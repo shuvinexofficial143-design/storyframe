@@ -1,0 +1,8 @@
+create extension if not exists "pgcrypto";
+create table if not exists projects(id uuid primary key default gen_random_uuid(),user_id uuid references auth.users(id) on delete cascade,name text not null,story_title text,chapter text,visual_style text default 'Cinematic Anime Realism',aspect_ratio text default '16:9',created_at timestamptz default now());
+create table if not exists stories(id uuid primary key default gen_random_uuid(),project_id uuid references projects(id) on delete cascade not null,raw_text text not null,summary text,analysis jsonb default '{}'::jsonb);
+create table if not exists characters(id uuid primary key default gen_random_uuid(),project_id uuid references projects(id) on delete cascade not null,name text not null,data jsonb default '{}'::jsonb,locked boolean default false);
+create table if not exists locations(id uuid primary key default gen_random_uuid(),project_id uuid references projects(id) on delete cascade not null,name text not null,data jsonb default '{}'::jsonb,locked boolean default false);
+create table if not exists scenes(id uuid primary key default gen_random_uuid(),project_id uuid references projects(id) on delete cascade not null,scene_number integer not null,source_text text,data jsonb default '{}'::jsonb,generated_image_url text,status text default 'idle');
+alter table projects enable row level security;alter table stories enable row level security;alter table characters enable row level security;alter table locations enable row level security;alter table scenes enable row level security;
+create policy "owners manage projects" on projects for all using(auth.uid()=user_id) with check(auth.uid()=user_id);
