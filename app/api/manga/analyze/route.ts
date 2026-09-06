@@ -27,9 +27,11 @@ const SceneOut=z.object({
 });
 const Output=z.object({summary:z.string(),characters:z.array(CharacterOut),locations:z.array(LocationOut),scenes:z.array(SceneOut)});
 type SceneOutput=z.infer<typeof SceneOut>;
+type CharacterOutput=z.infer<typeof CharacterOut>;
+type LocationOutput=z.infer<typeof LocationOut>;
 type ParsedInput=z.infer<typeof Input>;
 
-function normalizeName(value:string){return value.trim().toLowerCase().replace(/\s+/g," ")}
+function normalizeName(value:string){return value.trim().toLocaleLowerCase().replace(/\s+/g," ")}
 
 function extractJson(value:string){
   const cleaned=value.replace(/^```(?:json)?/i,"").replace(/```$/i,"").trim();
@@ -39,37 +41,88 @@ function extractJson(value:string){
   return JSON.parse(cleaned.slice(start,end+1));
 }
 
+const hindiStopWords=new Set([
+  "और","वह","उस","यह","था","थी","थे","में","का","की","के","को","से","पर","एक","ने","फिर","लेकिन","जब","तो","भी","ही","है","हैं","रहा","रही","गया","गई","कर","करके","अपने","उसने","उनके","उसका","उसकी","उसके","पास","सामने","अंदर","बाहर","हाथ","आंखें","आवाज","दरवाजा","कमरा","घर","रात","दिन","कुछ","किसी","तरफ","ओर","बाद","पहले","साथ","लिए","लिए","जैसे","कहा","देखा","लगा","हो","गई","गया"
+]);
+const englishStopWords=new Set(["the","a","an","he","she","they","it","this","that","and","but","when","then","after","before","inside","outside","with","from","into","there","here"]);
+
+function detectFallbackCharacters(input:ParsedInput):CharacterOutput[]{
+  if(input.existingCharacters.length) return [];
+  const counts=new Map<string,number>();
+  const latin=input.story.match(/\b[A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,})?\b/g)||[];
+  const devanagari=input.story.match(/[\u0900-\u097F]{2,}/g)||[];
+  for(const raw of [...latin,...devanagari]){
+    const name=raw.trim();
+    const key=normalizeName(name);
+    if(!key||englishStopWords.has(key)||hindiStopWords.has(name)) continue;
+    counts.set(name,(counts.get(name)||0)+1);
+  }
+  const candidates=[...counts.entries()].sort((a,b)=>b[1]-a[1]).filter(([,count])=>count>=2).slice(0,4).map(([name])=>name);
+  const names=candidates.length?candidates:["Main Character"];
+  return names.map((name,index)=>({
+    name,
+    visualDescription:index===0?"Canonical recurring protagonist. Preserve one exact face, age impression, body silhouette and skin tone across every scene.":"Canonical recurring supporting character. Preserve one exact face and body silhouette across every appearance.",
+    outfit:"Keep one stable story-appropriate outfit until the story explicitly changes it.",
+    eyeColor:"dark brown",
+    hairColor:"black",
+    keyFeatures:["same exact face in every scene","stable hairstyle","stable body proportions"],
+    referencePrompt:`${name}, canonical recurring story character, one fixed recognizable face, dark brown eyes, black hair, stable body proportions, stable story-appropriate clothing, same identity in every scene, cinematic realistic character design`
+  }));
+}
+
+function detectFallbackLocations(input:ParsedInput):LocationOutput[]{
+  if(input.existingLocations.length) return [];
+  const rules:Array<[string,RegExp,string]>=[
+    ["Haveli",/हवेली|haveli|mansion/i,"old Indian haveli architecture, carved doors, weathered walls, deep corridors"],
+    ["Courtyard",/आंगन|आँगन|दालान|courtyard/i,"old courtyard with consistent columns, floor layout and entrances"],
+    ["Underground Chamber",/तहखाना|basement|crypt|underground/i,"dark underground stone chamber with fixed stairway and wall layout"],
+    ["Temple",/मंदिर|temple/i,"traditional temple architecture with fixed shrine and pillars"],
+    ["Forest",/जंगल|forest|woods/i,"dense forest with recurring trail, tree pattern and atmospheric lighting"],
+    ["Room",/कमरा|room/i,"same recurring interior room layout, doors, windows and furniture"],
+    ["Street",/सड़क|गली|street|lane/i,"same recurring street layout and surrounding buildings"]
+  ];
+  const matches=rules.filter(([,pattern])=>pattern.test(input.story)).slice(0,4);
+  const selected=matches.length?matches:[["Primary Story Location",/.*/,"one fixed recurring environment layout derived from the story"] as [string,RegExp,string]];
+  return selected.map(([name,,architecture])=>({
+    name,
+    architectureStyle:architecture,
+    lighting:"cinematic lighting consistent with the story time and mood",
+    colorPalette:"stable restrained cinematic palette",
+    referencePrompt:`${name}, ${architecture}, preserve the same architecture, layout, doors, windows, recurring props, lighting logic and color palette across scenes`
+  }));
+}
+
 function fallback(input:ParsedInput){
   const sentences=input.story.replace(/\s+/g," ").split(/(?<=[.!?।])\s+/).filter(Boolean);
   const count=Math.min(input.targetScenes,Math.max(2,Math.ceil(sentences.length/2)));
   const chunk=Math.max(1,Math.ceil(sentences.length/count));
+  const newCharacters=detectFallbackCharacters(input);
+  const newLocations=detectFallbackLocations(input);
+  const allCharacters=[...input.existingCharacters,...newCharacters];
+  const allLocations=[...input.existingLocations,...newLocations];
   const scenes:SceneOutput[]=[];
 
   for(let i=0;i<sentences.length;i+=chunk){
     const sourceText=sentences.slice(i,i+chunk).join(" ");
     const sourceNormalized=normalizeName(sourceText);
-    const sceneNumber:number=scenes.length+1;
-    const characterNames=input.existingCharacters.filter((item)=>sourceNormalized.includes(normalizeName(item.name))).map((item)=>item.name);
-    const locationNames=input.existingLocations.filter((item)=>sourceNormalized.includes(normalizeName(item.name))).map((item)=>item.name);
+    const sceneNumber=scenes.length+1;
+    let characterNames=allCharacters.filter((item)=>sourceNormalized.includes(normalizeName(item.name))).map((item)=>item.name);
+    if(!characterNames.length&&allCharacters[0]) characterNames=[allCharacters[0].name];
+    let locationNames=allLocations.filter((item)=>sourceNormalized.includes(normalizeName(item.name))).map((item)=>item.name);
+    if(!locationNames.length&&allLocations[0]) locationNames=[allLocations[0].name];
     scenes.push({
       title:`Scene ${sceneNumber}`,
       sourceText,
       description:sourceText,
       characterNames,
       locationNames,
-      cameraShot:sceneNumber%3===1?"Wide cinematic shot":sceneNumber%3===2?"Medium cinematic shot":"Close-up cinematic shot",
-      imagePrompt:`Cinematic visual storytelling frame depicting: ${sourceText}. coherent environment, expressive composition, dramatic lighting, highly detailed, 16:9`,
+      cameraShot:sceneNumber%4===1?"Wide cinematic establishing shot":sceneNumber%4===2?"Medium cinematic shot":sceneNumber%4===3?"Close-up emotional shot":"Over-the-shoulder cinematic shot",
+      imagePrompt:`Cinematic story frame depicting exactly this moment: ${sourceText}. Keep the recurring protagonist visually identical to previous scenes. coherent environment, realistic anatomy, expressive composition, dramatic motivated lighting, highly detailed, 16:9`,
       narrationScript:sourceText
     });
   }
 
-  return {
-    summary:sentences.slice(0,3).join(" "),
-    characters:[],
-    locations:[],
-    scenes:scenes.slice(0,input.targetScenes),
-    provider:"heuristic-fallback"
-  };
+  return {summary:sentences.slice(0,3).join(" "),characters:newCharacters,locations:newLocations,scenes:scenes.slice(0,input.targetScenes),provider:"continuity-fallback"};
 }
 
 export async function POST(request:Request){
@@ -80,21 +133,19 @@ export async function POST(request:Request){
 
     const apiKey=process.env.POLLINATIONS_API_KEY?.trim();
     if(!apiKey){
-      return NextResponse.json({...fallback(input),warning:"POLLINATIONS_API_KEY is not configured. Used local continuity-aware fallback analysis."});
+      return NextResponse.json({...fallback(input),warning:"Pollinations API key is not configured. Used continuity-aware local analysis."});
     }
 
     const baseUrl=process.env.POLLINATIONS_BASE_URL?.replace(/\/$/,"")||"https://gen.pollinations.ai";
-    const model=process.env.POLLINATIONS_TEXT_MODEL?.trim()||"openai";
-    const library={
-      characters:input.existingCharacters.map(({manualReferenceImage,...item})=>item),
-      locations:input.existingLocations
-    };
+    const model=process.env.POLLINATIONS_MANGA_TEXT_MODEL?.trim()||"openai-fast";
+    const library={characters:input.existingCharacters.map(({manualReferenceImage,...item})=>item),locations:input.existingLocations};
 
-    const system=`You are the continuity director for a manga/webtoon production studio. Return STRICT JSON only, with no markdown fences or commentary. Preserve chronology and never redesign an existing project reference.`;
-    const user=`Project: ${input.projectName}\nChapter: ${input.chapterTitle}\nTarget visual scenes: about ${input.targetScenes}.\n\nEXISTING PROJECT REFERENCE LIBRARY:\n${JSON.stringify(library,null,2)}\n\nCHAPTER STORY:\n${input.story}\n\nReturn exactly this JSON shape:\n{\n  "summary":"...",\n  "characters":[{"name":"...","visualDescription":"...","outfit":"...","eyeColor":"...","hairColor":"...","keyFeatures":["..."],"referencePrompt":"..."}],\n  "locations":[{"name":"...","architectureStyle":"...","lighting":"...","colorPalette":"...","referencePrompt":"..."}],\n  "scenes":[{"title":"...","sourceText":"...","description":"...","characterNames":["..."],"locationNames":["..."],"cameraShot":"...","imagePrompt":"...","narrationScript":"..."}]\n}\n\nRules:\n1. Break the chapter into visually meaningful story beats, not arbitrary paragraphs.\n2. For every existing character/location, USE THE EXACT SAME canonical name from the reference library.\n3. Never redesign an existing reference and never return an existing reference inside characters[] or locations[].\n4. characters[] and locations[] must contain ONLY genuinely new references.\n5. New character referencePrompt must be a compact reusable visual token with face, body silhouette, eyes, hair, outfit, accessories and signature features supported by the story.\n6. New location referencePrompt must contain architecture, layout cues, lighting and color palette.\n7. Each scene must list characterNames/locationNames using exact canonical names.\n8. imagePrompt must describe only scene action, composition, camera, lighting and art direction. The app will append locked reference strings later.\n9. imagePrompt must be English for image-generation quality, even when narration is Hindi.\n10. narrationScript should match the source language and scene.\n11. No subtitles, speech bubbles, logos, watermarks or text inside image prompts.`;
+    const system=`You are the continuity director for a manga/webtoon production studio. Return STRICT JSON only, with no markdown fences or commentary. Preserve source chronology. Never redesign an existing project reference. Your job is visual continuity, not creative rewriting.`;
+    const user=`Project: ${input.projectName}\nChapter: ${input.chapterTitle}\nTarget visual scenes: ${input.targetScenes}.\n\nEXISTING PROJECT REFERENCE LIBRARY:\n${JSON.stringify(library)}\n\nCHAPTER STORY:\n${input.story}\n\nReturn exactly this JSON shape:\n{\n  "summary":"...",\n  "characters":[{"name":"...","visualDescription":"...","outfit":"...","eyeColor":"...","hairColor":"...","keyFeatures":["..."],"referencePrompt":"..."}],\n  "locations":[{"name":"...","architectureStyle":"...","lighting":"...","colorPalette":"...","referencePrompt":"..."}],\n  "scenes":[{"title":"...","sourceText":"...","description":"...","characterNames":["..."],"locationNames":["..."],"cameraShot":"...","imagePrompt":"...","narrationScript":"..."}]\n}\n\nRules:\n1. Break the chapter into visually meaningful chronological beats, not arbitrary paragraphs.\n2. Reuse EXACT canonical names from the existing library.\n3. Never redesign existing characters or locations.\n4. characters[] and locations[] contain ONLY genuinely new references.\n5. Every important recurring person must appear in characterNames in every scene where they are visually present, including pronoun-only continuation scenes.\n6. New character referencePrompt must be concrete and reusable: age impression, face shape, skin tone when supported, eyes, hair, body silhouette, outfit, accessories and signature features.\n7. New location referencePrompt must include architecture, layout cues, recurring props, lighting and color palette.\n8. imagePrompt must be English and describe only the exact scene action, composition, camera and lighting. Do not duplicate locked reference strings; the app appends them.\n9. narrationScript follows the source language and meaning.\n10. No subtitles, speech bubbles, logos, watermark or written text in image prompts.`;
 
     const controller=new AbortController();
-    const timer=setTimeout(()=>controller.abort(),Number(process.env.POLLINATIONS_ANALYZE_TIMEOUT_MS||30000));
+    const timeoutMs=Math.max(Number(process.env.POLLINATIONS_ANALYZE_TIMEOUT_MS||0),90000);
+    const timer=setTimeout(()=>controller.abort(),timeoutMs);
 
     try{
       const response=await fetch(`${baseUrl}/v1/chat/completions`,{
@@ -103,7 +154,9 @@ export async function POST(request:Request){
         body:JSON.stringify({
           model,
           messages:[{role:"system",content:system},{role:"user",content:user}],
-          temperature:0.15
+          temperature:0.1,
+          max_tokens:12000,
+          response_format:{type:"json_object"}
         }),
         signal:controller.signal,
         cache:"no-store"
@@ -111,17 +164,17 @@ export async function POST(request:Request){
 
       const raw=await response.text();
       if(!response.ok) throw new Error(`Pollinations text ${response.status}: ${raw.replace(/\s+/g," ").slice(0,500)}`);
-
       const envelope=JSON.parse(raw) as {choices?:Array<{message?:{content?:unknown}}>};
       const content=envelope.choices?.[0]?.message?.content;
       const text=typeof content==="string"?content:content&&typeof content==="object"?JSON.stringify(content):"";
       if(!text) throw new Error("Pollinations returned no structured chapter analysis");
-
       const result=Output.parse(extractJson(text));
       return NextResponse.json({...result,provider:`pollinations:${model}`});
     }catch(error){
-      console.error("Pollinations manga analysis failed; using fallback",error);
-      return NextResponse.json({...fallback(input),warning:error instanceof Error?`Pollinations analysis failed: ${error.message}. Used local continuity-aware fallback.`:"Pollinations analysis failed. Used local continuity-aware fallback."});
+      console.error("Pollinations manga analysis failed; using continuity fallback",error);
+      const result=fallback(input);
+      const reason=error instanceof Error?error.message:"unknown error";
+      return NextResponse.json({...result,warning:`Fast AI analysis was unavailable (${reason}). Used continuity-aware fallback with stable character/location references.`});
     }finally{
       clearTimeout(timer);
     }
