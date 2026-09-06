@@ -1,108 +1,61 @@
-# StoryFrame AI
+# StoryFrame AI — Manga & Webtoon Continuity Studio
 
-StoryFrame AI converts a pasted story or novel chapter into a reusable visual production pipeline for Novel Explained / cinematic narration videos.
+StoryFrame is now a project-based manga/webtoon continuity workspace.
 
-## Final workflow
+## Main workflow
 
-**Story → AI analysis → Character Bible → Character References → Location Bible → Scene Breakdown → Flux/Kontext Image Generation → Storyboard → Timeline → Export**
+**Project → Chapter → Gemini Story Analysis → Global Character/Place Library → Canonical Scene Prompts → Pollinations Flux Images → Narration → Export**
 
-## What is fixed in this version
+## Core features
 
-- Safe JSON parsing on the client. HTML/plain-text server errors no longer crash with `Unexpected token`.
-- Pollinations story analysis uses a timeout and automatically falls back to local scene breakdown if analysis is slow or unavailable.
-- Flux is the default text-to-image model.
-- Locked character references are passed to the reference-capable consistency model when available.
-- If reference-model generation fails, the route retries Flux without references instead of returning a fake mock image.
-- Generate All now sends the full scene + characters + location payload.
-- Scene cards show model, reference count, seed and readable generation errors.
-- Regenerate uses a new seed while preserving character/location continuity instructions.
-- Base64 previews are compacted out of localStorage when a reusable source URL exists, reducing browser-storage failures.
+- Multiple projects with project selector
+- Multiple chapters inside each project
+- IndexedDB persistence for projects, chapters, references, prompts and generated image previews
+- Gemini cross-chapter analysis
+- Automatic extraction of new characters and locations
+- Global project reference library
+- Existing references are never overwritten during later chapter analysis
+- Exact locked character/location reference tokens are appended to every scene prompt
+- Editable character appearance, outfit, eyes, hair, key features and reference prompt
+- Optional manual character reference image upload for project documentation
+- Editable location architecture, lighting, palette and environment token
+- Stable deterministic scene seeds
+- Regenerate with a new seed
+- Pollinations Flux server-side generation
+- Image download, prompt copy and narration copy
+- Project JSON export
+- Legacy StoryFrame pages remain available under their original routes
 
-## Repository structure
-
-```text
-storyframe/
-├─ .github/
-│  └─ workflows/
-│     └─ ci.yml
-├─ app/
-│  ├─ api/
-│  │  ├─ analyze/
-│  │  │  └─ route.ts
-│  │  ├─ characters/
-│  │  │  └─ reference/
-│  │  │     └─ route.ts
-│  │  └─ generate/
-│  │     └─ route.ts
-│  ├─ characters/
-│  │  └─ page.tsx
-│  ├─ locations/
-│  │  └─ page.tsx
-│  ├─ projects/
-│  │  └─ page.tsx
-│  ├─ scenes/
-│  │  └─ page.tsx
-│  ├─ settings/
-│  │  └─ page.tsx
-│  ├─ story/
-│  │  └─ page.tsx
-│  ├─ storyboard/
-│  │  └─ page.tsx
-│  ├─ timeline/
-│  │  └─ page.tsx
-│  ├─ globals.css
-│  ├─ layout.tsx
-│  └─ page.tsx
-├─ components/
-│  ├─ app-shell.tsx
-│  ├─ project-provider.tsx
-│  ├─ scene-card.tsx
-│  └─ ui.tsx
-├─ lib/
-│  ├─ default-project.ts
-│  ├─ fetch-json.ts
-│  ├─ pollinations.ts
-│  └─ types.ts
-├─ supabase/
-│  └─ schema.sql
-├─ .env.example
-├─ .gitignore
-├─ eslint.config.mjs
-├─ next.config.ts
-├─ package.json
-├─ postcss.config.mjs
-├─ tsconfig.json
-└─ README.md
-```
-
-## Pollinations configuration
-
-Create `.env.local` from `.env.example`:
+## Environment variables
 
 ```env
-POLLINATIONS_BASE_URL=https://gen.pollinations.ai
+GEMINI_API_KEY=
+GEMINI_TEXT_MODEL=gemini-3.5-flash-lite
+GEMINI_ANALYZE_TIMEOUT_MS=30000
+
 POLLINATIONS_API_KEY=
-POLLINATIONS_TEXT_MODEL=openai
 POLLINATIONS_IMAGE_MODEL=flux
-POLLINATIONS_CONSISTENCY_MODEL=kontext
-POLLINATIONS_ANALYZE_TIMEOUT_MS=10000
-POLLINATIONS_IMAGE_TIMEOUT_MS=45000
+POLLINATIONS_IMAGE_TIMEOUT_MS=60000
 ```
 
-`POLLINATIONS_API_KEY` may be left empty when the public endpoint/model is available. Availability, quotas and model access are controlled by Pollinations.
+Keep both API keys server-side in Vercel Environment Variables. Never hard-code them into the repository or client bundle.
 
-## Recommended consistency workflow
+## API routes
 
-1. Paste and analyze the story.
-2. Open **Characters**.
-3. Generate a reference image for every recurring character.
-4. Edit appearance/outfit notes until each reference is correct.
-5. Lock the approved characters.
-6. Open **Scenes** and run **Generate all scenes**.
-7. Review weak scenes and regenerate them individually with a new seed.
-8. Review the final sequence in **Storyboard** and **Timeline**.
+- `POST /api/manga/analyze` — sends the current chapter plus the existing project reference library to Gemini and returns structured scenes + only genuinely new references.
+- `POST /api/manga/image` — securely proxies a 1024×576 Flux image request to Pollinations using the scene's canonical prompt and stable seed.
 
-## Local run
+## Cross-chapter continuity
+
+When Chapter 2 is analyzed, the complete Character/Location Reference Library from Chapter 1 is sent to Gemini. Existing references keep their stored visual tokens. New references are appended to the project library. Scene prompts are then rebuilt with the exact locked reference strings stored in the project.
+
+If a reference token is edited later, scenes that use that reference are marked stale, their old image preview is cleared, and their prompts are rebuilt while retaining the scene seed.
+
+## Storage
+
+The Continuity Studio uses IndexedDB (`storyframe-manga-continuity`) rather than localStorage so generated image data does not immediately overflow the browser's small localStorage quota.
+
+## Development
 
 ```bash
 npm install
@@ -116,14 +69,3 @@ npm run typecheck
 npm run lint
 npm run build
 ```
-
-## Models
-
-- `flux` — default text-to-image and character reference generation.
-- `kontext` — reference-aware scene generation when character reference URLs are available.
-
-Pollinations exposes multiple image models and its model list can change over time, so model names are kept configurable through environment variables.
-
-## Content rights
-
-Only upload or generate from stories you own, are licensed to use, or are otherwise legally permitted to transform.
