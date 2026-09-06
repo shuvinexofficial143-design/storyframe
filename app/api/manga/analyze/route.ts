@@ -26,6 +26,7 @@ const SceneOut=z.object({
   title:z.string(),sourceText:z.string(),description:z.string(),characterNames:z.array(z.string()),locationNames:z.array(z.string()),cameraShot:z.string(),imagePrompt:z.string(),narrationScript:z.string()
 });
 const Output=z.object({summary:z.string(),characters:z.array(CharacterOut),locations:z.array(LocationOut),scenes:z.array(SceneOut)});
+type SceneOutput=z.infer<typeof SceneOut>;
 
 const schema={
   type:"object",
@@ -48,10 +49,10 @@ function fallback(story:string,targetScenes:number){
   const sentences=story.replace(/\s+/g," ").split(/(?<=[.!?।])\s+/).filter(Boolean);
   const count=Math.min(targetScenes,Math.max(2,Math.ceil(sentences.length/2)));
   const chunk=Math.max(1,Math.ceil(sentences.length/count));
-  const scenes=[];
+  const scenes:SceneOutput[]=[];
   for(let i=0;i<sentences.length;i+=chunk){
     const sourceText=sentences.slice(i,i+chunk).join(" ");
-    const sceneNumber=scenes.length+1;
+    const sceneNumber:number=scenes.length+1;
     scenes.push({
       title:`Scene ${sceneNumber}`,
       sourceText,
