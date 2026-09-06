@@ -26,7 +26,7 @@ async function fetchBinaryAsDataUrl(url:string,apiKey:string){
 }
 
 async function generateWithReferenceEdits(input:{prompt:string;referenceImages:string[];width:number;height:number;apiKey:string}) : Promise<GeneratedImage>{
-  const model=process.env.POLLINATIONS_CONSISTENCY_MODEL?.trim()||"klein";
+  const model=process.env.POLLINATIONS_MANGA_CONSISTENCY_MODEL?.trim()||"klein";
   const form=new FormData();
   for(const [index,dataUrl] of input.referenceImages.slice(0,2).entries()){
     const parsed=parseDataUrl(dataUrl);
