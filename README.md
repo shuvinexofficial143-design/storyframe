@@ -1,50 +1,41 @@
 # StoryFrame AI
 
-Original cinematic story-to-scene workspace for Novel Explained / visual-story workflows.
+StoryFrame AI turns a pasted story chapter into a visual production pipeline:
+- real AI story analysis through Pollinations (with local heuristic fallback)
+- character bible with reference portrait generation
+- location bible
+- scene-by-scene prompts
+- storyboard/timeline friendly scene cards
 
-**Story → Character Bible → Location Bible → Scene Breakdown → Image Queue → Storyboard → Timeline → Export**
+## Stack
+- Next.js App Router
+- React + TypeScript
+- LocalStorage project persistence
+- Pollinations unified API for text + image generation
 
-## MVP included
-- Next.js 16.3.3 + React 19.2.8 + Tailwind 4.3.3
-- Long story editor
-- Server-side mock story analyzer
-- Automatic cast/location extraction
-- Visual scene breakdown with cinematic shots
-- Character and location locking
-- Editable per-scene prompts
-- Server-side mock image generator producing SVG assets
-- Generate All queue
-- Storyboard and timeline
-- localStorage autosave
-- JSON export
-- Supabase starter schema
-- GitHub Actions CI
+## Environment
+Create `.env.local` from `.env.example`.
 
-## Run
+```env
+POLLINATIONS_BASE_URL=https://gen.pollinations.ai
+POLLINATIONS_API_KEY=
+POLLINATIONS_TEXT_MODEL=openai
+POLLINATIONS_IMAGE_MODEL=flux
+POLLINATIONS_CONSISTENCY_MODEL=kontext
+```
+
+## Key routes
+- `POST /api/analyze` → real story analysis via Pollinations, fallback to heuristic extraction
+- `POST /api/characters/reference` → generates a reusable character reference portrait
+- `POST /api/generate` → generates final scene frames using scene + character + location continuity context
+
+## Local run
 ```bash
 npm install
 npm run dev
 ```
-Open http://localhost:3000
 
-Then run:
-```bash
-npm run typecheck
-npm run lint
-npm run build
-```
-
-## Demo
-Open **Story** → **Load demo story** → **Analyze story** → review **Characters/Locations** → open **Scenes** → **Generate all** → review **Storyboard/Timeline**.
-
-The default providers are mock so the end-to-end flow works without spending API credits. Replace `/api/analyze` and `/api/generate` with real server-side provider adapters later.
-
-## Next batches
-1. OpenAI/Gemini structured story analysis
-2. Character reference-sheet generation and image uploads
-3. OpenAI/Google/Replicate/fal image adapters
-4. Supabase Auth + cloud project persistence
-5. Continuity state timeline and vision-based consistency scoring
-
-## Rights
-Only upload or generate from stories you own, are licensed to use, or are otherwise legally permitted to transform.
+## Notes
+- Keep API keys on the server only.
+- Generated images are returned as data URIs in this MVP for easy previewing.
+- If the live provider fails, the app falls back to mock output instead of fully breaking.
