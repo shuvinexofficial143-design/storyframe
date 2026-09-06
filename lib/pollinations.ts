@@ -7,7 +7,7 @@ export function hasPollinations(){
   return Boolean(baseUrl);
 }
 
-export function getAuthHeaders(){
+export function getAuthHeaders():Record<string,string>{
   return apiKey?{Authorization:`Bearer ${apiKey}`}:{ };
 }
 
