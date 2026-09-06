@@ -12,7 +12,7 @@ const Input=z.object({
 type GeneratedImage={imageDataUrl:string;model:string;referenceMode:"reference-edit"|"text-to-image";warning?:string};
 
 function parseDataUrl(value:string){
-  const match=value.match(/^data:([^;,]+);base64,(.+)$/s);
+  const match=value.match(/^data:([^;,]+);base64,([\s\S]+)$/);
   if(!match) throw new Error("Reference image must be a base64 data URL");
   return {mime:match[1],bytes:Buffer.from(match[2],"base64")};
 }
