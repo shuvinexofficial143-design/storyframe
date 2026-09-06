@@ -203,11 +203,11 @@ export function buildCanonicalScenePrompt(input:{
   const {scene,sceneNumber,projectId,chapterId,characters,locations}=input;
   const charRefs=scene.characterNames.map((name)=>characters.find((item)=>normalizeName(item.name)===normalizeName(name))).filter(Boolean) as CharacterReference[];
   const locRefs=scene.locationNames.map((name)=>locations.find((item)=>normalizeName(item.name)===normalizeName(name))).filter(Boolean) as LocationReference[];
-  const characterBlock=charRefs.length?`\n\nLOCKED CHARACTER REFERENCES — reuse exactly:\n${charRefs.map((item)=>`${item.name}: ${item.referencePrompt}`).join("\n")}`:"";
-  const locationBlock=locRefs.length?`\n\nLOCKED LOCATION REFERENCES — reuse exactly:\n${locRefs.map((item)=>`${item.name}: ${item.referencePrompt}`).join("\n")}`:"";
-  const seedMaterial=`${projectId}|${chapterId}|${sceneNumber}|${charRefs.map((item)=>item.seedBase).join("-")}|${scene.title}`;
+  const characterBlock=charRefs.length?`\n\nIDENTITY LOCK — these are the exact recurring characters. Do not redesign them:\n${charRefs.map((item)=>`${item.name}: ${item.referencePrompt}`).join("\n")}`:"";
+  const locationBlock=locRefs.length?`\n\nLOCATION LOCK — preserve these exact environment traits:\n${locRefs.map((item)=>`${item.name}: ${item.referencePrompt}`).join("\n")}`:"";
+  const identitySeed=charRefs[0]?.seedBase??hashString(`${projectId}|${chapterId}|${locRefs[0]?.name||sceneNumber}`);
   return {
-    prompt:`${scene.imagePrompt}${characterBlock}${locationBlock}\n\nContinuity rules: same face, hair, eyes, outfit, body silhouette, architecture, palette and recurring props as the locked references. cinematic composition, clean anatomy, detailed hands, no text, no logo, no watermark.`,
-    seed:hashString(seedMaterial)
+    prompt:`${scene.imagePrompt}${characterBlock}${locationBlock}\n\nSTRICT CONTINUITY: the same named character must keep the exact same face shape, eye color, hairstyle, hair length, age impression, skin tone, body proportions and outfit across every scene. Never substitute a different-looking person. Preserve recurring architecture, doors, windows, palette and props. Change only pose, expression, camera, lighting and story action. cinematic composition, realistic anatomy, detailed hands, no text, no logo, no watermark.`,
+    seed:identitySeed
   };
 }
