@@ -35,8 +35,12 @@ export type Scene={
   negativePrompt:string;
   continuityNotes:string;
   generatedImage?:string;
+  generatedImageSourceUrl?:string;
   generationSeed?:number;
+  generationModel?:string;
+  referenceCount?:number;
   provider?:string;
+  errorMessage?:string;
   generationStatus:"idle"|"queued"|"generating"|"completed"|"failed";
 };
 
