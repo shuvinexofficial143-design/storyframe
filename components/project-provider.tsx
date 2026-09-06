@@ -26,21 +26,22 @@ type Ctx={
 
 const Context=createContext<Ctx|null>(null);
 
+function loadInitialProject():ProjectState{
+  if(typeof window==="undefined") return defaultProject;
+  try{
+    const stored=window.localStorage.getItem(KEY);
+    return stored?JSON.parse(stored) as ProjectState:defaultProject;
+  }catch{
+    return defaultProject;
+  }
+}
+
 export function ProjectProvider({children}:{children:React.ReactNode}){
-  const[project,setProject]=useState<ProjectState>(defaultProject);
-  const[ready,setReady]=useState(false);
+  const[project,setProject]=useState<ProjectState>(loadInitialProject);
 
   useEffect(()=>{
-    try{
-      const stored=localStorage.getItem(KEY);
-      if(stored) setProject(JSON.parse(stored));
-    }catch{}
-    setReady(true);
-  },[]);
-
-  useEffect(()=>{
-    if(ready) localStorage.setItem(KEY,JSON.stringify(project));
-  },[project,ready]);
+    window.localStorage.setItem(KEY,JSON.stringify(project));
+  },[project]);
 
   const value=useMemo<Ctx>(()=>({
     project,
