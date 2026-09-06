@@ -1,3 +1,5 @@
+import type {VisualCategory} from "./manga-storyboard-prompt";
+
 export type CharacterReference={
   id:string;
   name:string;
@@ -28,11 +30,15 @@ export type MangaScene={
   id:string;
   sceneNumber:number;
   title:string;
+  visualCategory:VisualCategory;
   sourceText:string;
   description:string;
   characterNames:string[];
   locationNames:string[];
   cameraShot:string;
+  cameraAngle:string;
+  lightingStyle:string;
+  continuityNotes:string;
   baseImagePrompt:string;
   imagePrompt:string;
   narrationScript:string;
@@ -76,12 +82,17 @@ export type AnalyzeChapterResponse={
   characters:Array<Omit<CharacterReference,"id"|"seedBase"|"createdInChapterId"|"updatedAt"|"manualReferenceImage">>;
   locations:Array<Omit<LocationReference,"id"|"createdInChapterId"|"updatedAt">>;
   scenes:Array<{
+    sceneNumber:number;
     title:string;
+    visualCategory:VisualCategory;
     sourceText:string;
     description:string;
     characterNames:string[];
     locationNames:string[];
     cameraShot:string;
+    cameraAngle:string;
+    lightingStyle:string;
+    continuityNotes:string;
     imagePrompt:string;
     narrationScript:string;
   }>;
@@ -206,8 +217,9 @@ export function buildCanonicalScenePrompt(input:{
   const characterBlock=charRefs.length?`\n\nIDENTITY LOCK — these are the exact recurring characters. Do not redesign them:\n${charRefs.map((item)=>`${item.name}: ${item.referencePrompt}`).join("\n")}`:"";
   const locationBlock=locRefs.length?`\n\nLOCATION LOCK — preserve these exact environment traits:\n${locRefs.map((item)=>`${item.name}: ${item.referencePrompt}`).join("\n")}`:"";
   const identitySeed=charRefs[0]?.seedBase??hashString(`${projectId}|${chapterId}|${locRefs[0]?.name||sceneNumber}`);
+  const storyboardBlock=`\n\nSTORYBOARD INTENT: ${scene.visualCategory}. Camera: ${scene.cameraAngle||scene.cameraShot}. Lighting: ${scene.lightingStyle}. Continuity note: ${scene.continuityNotes}`;
   return {
-    prompt:`${scene.imagePrompt}${characterBlock}${locationBlock}\n\nSTRICT CONTINUITY: the same named character must keep the exact same face shape, eye color, hairstyle, hair length, age impression, skin tone, body proportions and outfit across every scene. Never substitute a different-looking person. Preserve recurring architecture, doors, windows, palette and props. Change only pose, expression, camera, lighting and story action. cinematic composition, realistic anatomy, detailed hands, no text, no logo, no watermark.`,
+    prompt:`${scene.imagePrompt}${storyboardBlock}${characterBlock}${locationBlock}\n\nSTRICT CONTINUITY: the same named character must keep the exact same face shape, eye color, hairstyle, hair length, age impression, skin tone, body proportions and outfit across every scene. Never substitute a different-looking person. Preserve recurring architecture, doors, windows, palette and props. Change only pose, expression, camera, lighting and story action. realistic anatomy, detailed hands, no text, no logo, no watermark.`,
     seed:identitySeed
   };
 }
