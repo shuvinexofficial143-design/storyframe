@@ -1,5 +1,5 @@
-import {MangaContinuityStudio} from "@/components/manga-continuity-studio";
+import {CinematicContinuityStudio} from "@/components/cinematic-continuity-studio";
 
 export default function HomePage(){
-  return <MangaContinuityStudio/>;
+  return <CinematicContinuityStudio/>;
 }
