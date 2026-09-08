@@ -14,7 +14,7 @@ export function buildPollinationsPublicUrl(input:ImageGenerationInput){
 
 export const pollinationsImageProvider:ImageProvider={
   id:"pollinations",
-  name:"Pollinations Public",
+  name:"Pollinations Public · flux-anime",
   defaultModel:"flux-anime",
   capabilities:{
     textToImage:true,
@@ -23,6 +23,8 @@ export const pollinationsImageProvider:ImageProvider={
     characterReference:false,
     negativePrompt:false
   },
+  responseKind:"binary",
+  isConfigured(){return true},
   buildRequest(input){
     return {url:buildPollinationsPublicUrl({...input,model:input.model||"flux-anime"}),method:"GET",headers:{Accept:"image/*"}};
   }
