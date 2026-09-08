@@ -16,16 +16,16 @@ export default function Settings(){
   };
 
   return <>
-    <PageHeading eyebrow="Configuration" title="Settings & Export" description="Pollinations runs server-side. Flux is the default text-to-image model; scenes with locked character references first try the reference-capable consistency model."/>
+    <PageHeading eyebrow="Configuration" title="Settings & Export" description="Cloudflare Workers AI is the preferred image provider. If it is unavailable or not configured, StoryFrame automatically falls back to Pollinations public flux-anime generation."/>
     <div className="grid gap-5 lg:grid-cols-2">
       <Card className="p-6">
         <div className="flex items-center gap-2 font-bold"><ShieldCheck size={17}/> Provider configuration</div>
-        <p className="mt-3 text-sm leading-6 text-zinc-400">Keep keys on the server only. Anonymous/public generation is attempted when no key is configured, subject to Pollinations availability and model access.</p>
-        <div className="mt-5 rounded-xl border border-white/8 bg-black/20 p-4 font-mono text-xs leading-6 text-zinc-400">POLLINATIONS_BASE_URL=https://gen.pollinations.ai<br/>POLLINATIONS_API_KEY=<br/>POLLINATIONS_TEXT_MODEL=openai<br/>POLLINATIONS_IMAGE_MODEL=flux<br/>POLLINATIONS_CONSISTENCY_MODEL=kontext<br/>POLLINATIONS_ANALYZE_TIMEOUT_MS=10000<br/>POLLINATIONS_IMAGE_TIMEOUT_MS=45000</div>
+        <p className="mt-3 text-sm leading-6 text-zinc-400">Keep Cloudflare and Pollinations credentials server-side in Vercel Environment Variables. Never commit real API tokens to GitHub.</p>
+        <div className="mt-5 rounded-xl border border-white/8 bg-black/20 p-4 font-mono text-xs leading-6 text-zinc-400">STORYFRAME_DEFAULT_IMAGE_PROVIDER=cloudflare<br/>CLOUDFLARE_ACCOUNT_ID=<br/>CLOUDFLARE_API_TOKEN=<br/>CLOUDFLARE_IMAGE_MODEL=@cf/black-forest-labs/flux-2-klein-9b<br/><br/>POLLINATIONS_BASE_URL=https://gen.pollinations.ai<br/>POLLINATIONS_API_KEY=<br/>POLLINATIONS_TEXT_MODEL=openai<br/>POLLINATIONS_IMAGE_MODEL=flux-anime</div>
       </Card>
       <Card className="p-6">
         <div className="flex items-center gap-2 font-bold"><Sparkles size={17}/> Generation behavior</div>
-        <div className="mt-4 space-y-3 text-sm text-zinc-400"><p><strong className="text-zinc-200">Flux:</strong> default scene and character-reference generation.</p><p><strong className="text-zinc-200">Kontext:</strong> attempted when a scene has reusable character reference URLs.</p><p><strong className="text-zinc-200">Fallback:</strong> if the reference-model request fails, the server retries Flux without references instead of returning a fake mock image.</p></div>
+        <div className="mt-4 space-y-3 text-sm text-zinc-400"><p><strong className="text-zinc-200">Cloudflare FLUX.2 klein 9B:</strong> primary scene generation with deterministic seeds and up to four resized reference images.</p><p><strong className="text-zinc-200">Reference priority:</strong> recurring character references first, then environment references, then previous-scene continuity.</p><p><strong className="text-zinc-200">Pollinations flux-anime:</strong> automatic public text-to-image fallback when Cloudflare is unavailable.</p><p><strong className="text-zinc-200">Continuity:</strong> Visual Bible, canonical prompts, master seed and previous-scene memory remain active regardless of provider.</p></div>
       </Card>
       <Card className="p-6">
         <div className="font-bold">Project export</div>
