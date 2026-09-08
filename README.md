@@ -1,79 +1,97 @@
 # StoryFrame AI — Manga & Webtoon Continuity Studio
 
-StoryFrame is a project-based manga/webtoon continuity workspace.
+StoryFrame is a project-based cinematic manga/webtoon continuity workspace.
 
 ## Main workflow
 
-**Project → Chapter → Fast Pollinations Story Analysis → Character/Place Library → Canonical Character Reference Images → Locked Scene Prompts → Public Flux-Anime Scene Images → Narration → Export**
+**Project → Chapter → Story Analysis → Persistent Visual Bible → Character / World / Location / Prop Bibles → Prompt Compiler → Cloudflare FLUX.2 Reference-Aware Images → Previous Scene Memory → Pollinations flux-anime Fallback → Export**
 
-## Core features
+## Core continuity features
 
-- Multiple projects and chapters
-- IndexedDB persistence
-- Pollinations-powered cross-chapter story analysis
-- Fast `openai-fast` chapter analyzer by default
-- 90-second minimum analysis timeout to avoid premature aborts
-- Automatic extraction of recurring characters and locations
-- Continuity-aware local fallback that still creates stable recurring references
-- Automatic canonical character portrait generation with public `flux-anime`
-- Manual character reference image upload or AI reference regeneration
-- Exact locked character/location tokens appended to scene prompts
-- Stable identity seed reused across scenes featuring the same primary character
-- Public Pollinations image generation through `https://image.pollinations.ai/prompt/...`
-- Hard-set `model=flux-anime` for manga/anime visuals
-- Image download, prompt copy, narration copy and project JSON export
+- Multiple projects and chapters with IndexedDB persistence
+- Persistent Project Visual Bible and master seed
+- Character IDs, identity locks, costume locks and temporary story states
+- World, location, prop, artifact and vehicle continuity records
+- Master Style Lock and Global Negative / Avoidance Lock
+- Cinematic beat-based scene splitting instead of sentence-by-sentence splitting
+- Deterministic scene seeds with Regenerate Same / Variation / Lock Seed behavior
+- Strict / Balanced / Loose continuity strength
+- Compact previous-scene continuity memory instead of endlessly growing prompts
+- Pre-generation continuity validation
+- Canonical prompt compiler that reuses stable blocks instead of letting the scene LLM redesign established entities
+- Canonical character-reference image generation and manual reference uploads
+
+## Image provider architecture
+
+StoryFrame now uses a modular image-provider layer under `lib/image-providers/`.
+
+### Primary: Cloudflare Workers AI
+
+Default model:
+
+```text
+@cf/black-forest-labs/flux-2-klein-9b
+```
+
+Cloudflare is used when `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` are configured. The integration uses multipart form data, deterministic `seed`, 16:9 output dimensions, and up to four reference images.
+
+Reference priority is:
+
+1. recurring character reference images
+2. recurring environment reference images
+3. previous-scene image continuity
+4. text-only canonical continuity locks
+
+Reference inputs are server-side resized to fit Cloudflare's small reference-image requirement before being sent.
+
+### Fallback: Pollinations
+
+If Cloudflare is unavailable, unconfigured or returns an error, StoryFrame automatically falls back to the public Pollinations image URL with:
+
+```text
+model=flux-anime
+```
+
+Pollinations fallback remains deterministic through the same compiled prompt and preserved seed, but it is treated as text-to-image only and is never falsely labelled as reference-conditioned.
 
 ## Environment variables
 
 ```env
+STORYFRAME_DEFAULT_IMAGE_PROVIDER=cloudflare
+
+CLOUDFLARE_ACCOUNT_ID=
+CLOUDFLARE_API_TOKEN=
+CLOUDFLARE_IMAGE_MODEL=@cf/black-forest-labs/flux-2-klein-9b
+
 POLLINATIONS_API_KEY=
 POLLINATIONS_BASE_URL=https://gen.pollinations.ai
-
 POLLINATIONS_MANGA_TEXT_MODEL=openai-fast
+POLLINATIONS_TEXT_MODEL=openai
+POLLINATIONS_IMAGE_MODEL=flux-anime
 POLLINATIONS_ANALYZE_TIMEOUT_MS=90000
 POLLINATIONS_IMAGE_TIMEOUT_MS=90000
-
-# Legacy StoryFrame text routes only
-POLLINATIONS_TEXT_MODEL=openai
 ```
 
-`POLLINATIONS_API_KEY` is still used by the server-side text-analysis route. The manga image and character-reference routes do **not** use a protected image API endpoint.
+Never commit real Cloudflare or Pollinations credentials. Keep them in Vercel Environment Variables.
 
-## API routes
+## Important routes
 
-- `POST /api/manga/analyze` — analyzes the chapter with the existing project library and returns scenes + only genuinely new references. If the live text model is unavailable, a local continuity-aware fallback is used.
-- `POST /api/manga/reference` — creates one canonical public `flux-anime` portrait for a recurring character using a preserved identity seed.
-- `POST /api/manga/image` — creates scene images through the public Pollinations URL with `model=flux-anime`, the existing scene seed, and the fully locked character/location continuity prompt.
+- `POST /api/manga/analyze-continuity` — cinematic chapter analysis with the persistent project bible
+- `POST /api/manga/reference-continuity` — canonical character reference generation through Cloudflare primary / Pollinations fallback
+- `POST /api/manga/image-continuity` — reference-aware scene generation through Cloudflare primary / Pollinations fallback
+- legacy `/api/generate`, `/api/characters/reference`, `/api/manga/image`, and `/api/manga/reference` routes also use the same provider fallback layer so older pages do not diverge from the current pipeline
 
-## Public image URL
+## Prompt compiler order
 
-Scene/reference generation uses the public pattern:
+Final prompts are assembled from bounded stable blocks:
 
-```text
-https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=576&model=flux-anime&nologo=true&seed=${seed}
-```
+**Master Style → World Lock → Location Lock → Character Locks → Prop / Vehicle Locks → Previous Scene Memory → Current Action → Camera / Composition → Lighting → Continuity Commands → Avoidance Lock**
 
-The backend fetches that public URL and returns a data URL to the UI for preview/download.
-
-## Continuity behavior
-
-The continuity engine still preserves:
-
-- exact canonical character names
-- locked face/eye/hair/outfit descriptions
-- location/environment lock strings
-- stable identity seed
-- chapter-to-chapter reference library
-
-The public `flux-anime` endpoint is text-to-image. Stored/uploaded reference images remain in the project library, but the scene route no longer sends them to a protected image-edit endpoint. Continuity therefore relies on the locked canonical prompt tokens plus the preserved seed.
-
-## Cross-chapter continuity
-
-Chapter 2 receives the complete Character/Location Reference Library from Chapter 1. Existing references are not redesigned. Newly discovered references are appended to the project library. The same canonical descriptions and stable identity seeds are reused in later chapters.
+Scene 40 does not contain scenes 1–39. Only permanent canon, relevant current entities and the compact previous-scene record are used.
 
 ## Storage
 
-The Continuity Studio uses IndexedDB (`storyframe-manga-continuity`) so project/reference/image data does not immediately overflow localStorage.
+The Cinematic Continuity Studio persists project data in IndexedDB so chapters, canonical references, visual bible data, generated scene state and continuity records survive reloads.
 
 ## Development
 
