@@ -1,7 +1,8 @@
 import {NextResponse} from "next/server";
 import {z} from "zod";
 import type {Character,Location,Scene} from "@/lib/types";
-import {buildScenePrompt,hashString,pollinationsImageToDataUri} from "@/lib/pollinations";
+import {buildScenePrompt,hashString,aspectRatioToSize} from "@/lib/pollinations";
+import {generateImageWithFallback} from "@/lib/image-providers";
 
 const CharacterInput=z.object({id:z.string(),name:z.string(),role:z.string(),appearance:z.string(),outfit:z.string(),locked:z.boolean(),referencePrompt:z.string().optional(),consistencyNotes:z.string().optional(),referenceImage:z.string().optional(),referenceImageSourceUrl:z.string().optional(),referenceSeed:z.number().optional()});
 const LocationInput=z.object({id:z.string(),name:z.string(),architecture:z.string(),lighting:z.string(),continuity:z.string(),locked:z.boolean()});
@@ -19,22 +20,27 @@ export async function POST(req:Request){
     const locationData=location as Location|undefined;
     const finalPrompt=buildScenePrompt({scene:sceneData,characters:characterData,location:locationData,visualStyle,aspectRatio});
     const seed=scene.generationSeed||hashString(`${scene.id}-${scene.sceneNumber}-${characterData.map((character)=>character.referenceSeed||character.name).join("|")}`);
-    const referenceImages=characterData.filter((character)=>Boolean(character.referenceImageSourceUrl)).sort((a,b)=>Number(b.locked)-Number(a.locked)).slice(0,4).map((character)=>character.referenceImageSourceUrl as string);
-    const baseModel=process.env.POLLINATIONS_IMAGE_MODEL||"flux";
-    const consistencyModel=process.env.POLLINATIONS_CONSISTENCY_MODEL||"kontext";
+    const referenceImages=characterData
+      .filter((character)=>Boolean(character.referenceImageSourceUrl||character.referenceImage))
+      .sort((a,b)=>Number(b.locked)-Number(a.locked))
+      .slice(0,4)
+      .map((character)=>(character.referenceImageSourceUrl||character.referenceImage) as string);
+    const {width,height}=aspectRatioToSize(aspectRatio);
+    const result=await generateImageWithFallback({prompt:finalPrompt,seed,width,height,negativePrompt:scene.negativePrompt,referenceImages});
 
-    let result;
-    let usedReferences=referenceImages.length;
-    try{
-      result=await pollinationsImageToDataUri({prompt:finalPrompt,aspectRatio,seed,referenceImages,modelOverride:referenceImages.length?consistencyModel:baseModel});
-    }catch(firstError){
-      if(!referenceImages.length) throw firstError;
-      console.error("Reference model failed; retrying Flux without image references",firstError);
-      usedReferences=0;
-      result=await pollinationsImageToDataUri({prompt:finalPrompt,aspectRatio,seed,referenceImages:[],modelOverride:baseModel});
-    }
-
-    return NextResponse.json({image:result.dataUri,sourceUrl:result.sourceUrl,provider:result.provider,seed,prompt:finalPrompt,model:result.model,referenceCount:usedReferences});
+    return NextResponse.json({
+      image:result.imageDataUrl,
+      sourceUrl:result.sourceUrl||result.imageDataUrl,
+      provider:result.provider,
+      seed:result.seed,
+      prompt:finalPrompt,
+      model:result.model,
+      referenceCount:result.referenceCount,
+      referenceMode:result.referenceMode,
+      fallbackUsed:result.fallbackUsed||false,
+      primaryError:result.primaryError,
+      warning:result.warning
+    });
   }catch(error){
     console.error("Scene image generation failed",error);
     return NextResponse.json({error:error instanceof Error?error.message:"Image generation failed"},{status:502});
