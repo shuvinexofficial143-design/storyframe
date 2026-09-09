@@ -16,16 +16,16 @@ export default function Settings(){
   };
 
   return <>
-    <PageHeading eyebrow="Configuration" title="Settings & Export" description="Gemini 3.1 Flash Lite Image is the preferred image-only provider. Story analysis remains on the existing StoryFrame pipeline. If Gemini image generation is unavailable, StoryFrame can fall back to Pollinations flux-anime."/>
+    <PageHeading eyebrow="Configuration" title="Settings & Export" description="Gemini 3.1 Flash Image is the preferred image-only provider. Story analysis remains on the existing StoryFrame pipeline. If Gemini image generation is unavailable, StoryFrame can fall back to Pollinations flux-anime."/>
     <div className="grid gap-5 lg:grid-cols-2">
       <Card className="p-6">
         <div className="flex items-center gap-2 font-bold"><ShieldCheck size={17}/> Provider configuration</div>
         <p className="mt-3 text-sm leading-6 text-zinc-400">Keep the Gemini API key server-side in Vercel Environment Variables. Never commit the real key to GitHub.</p>
-        <div className="mt-5 rounded-xl border border-white/8 bg-black/20 p-4 font-mono text-xs leading-6 text-zinc-400">STORYFRAME_DEFAULT_IMAGE_PROVIDER=gemini<br/>GEMINI_API_KEY=<br/>GEMINI_IMAGE_MODEL=gemini-3.1-flash-lite-image<br/><br/>POLLINATIONS_IMAGE_MODEL=flux-anime</div>
+        <div className="mt-5 rounded-xl border border-white/8 bg-black/20 p-4 font-mono text-xs leading-6 text-zinc-400">STORYFRAME_DEFAULT_IMAGE_PROVIDER=gemini<br/>GEMINI_API_KEY=<br/>GEMINI_IMAGE_MODEL=gemini-3.1-flash-image<br/><br/>POLLINATIONS_IMAGE_MODEL=flux-anime</div>
       </Card>
       <Card className="p-6">
         <div className="flex items-center gap-2 font-bold"><Sparkles size={17}/> Generation behavior</div>
-        <div className="mt-4 space-y-3 text-sm text-zinc-400"><p><strong className="text-zinc-200">Gemini 3.1 Flash Lite Image:</strong> cheapest Gemini image model, used only for StoryFrame image generation.</p><p><strong className="text-zinc-200">Resolution:</strong> 1K output with StoryFrame requesting the scene aspect ratio such as 16:9.</p><p><strong className="text-zinc-200">Continuity:</strong> canonical character/world/location prompts and previous-scene text memory remain active.</p><p><strong className="text-zinc-200">Seed note:</strong> Gemini does not expose a deterministic image seed parameter, so StoryFrame keeps the scene seed as metadata/prompt anchor; Regenerate Same may not be pixel-identical.</p><p><strong className="text-zinc-200">Fallback:</strong> Pollinations flux-anime remains available if Gemini is not configured or a Gemini request fails.</p></div>
+        <div className="mt-4 space-y-3 text-sm text-zinc-400"><p><strong className="text-zinc-200">Gemini 3.1 Flash Image:</strong> used only for StoryFrame image generation; story analysis is unchanged.</p><p><strong className="text-zinc-200">Reference continuity:</strong> recurring character references are sent first, then location/environment references, then the previous scene when available.</p><p><strong className="text-zinc-200">Resolution:</strong> 1K output with the requested scene aspect ratio such as 16:9.</p><p><strong className="text-zinc-200">Seed note:</strong> Gemini does not expose a deterministic image seed parameter, so StoryFrame keeps the scene seed as metadata/prompt anchor; Regenerate Same may not be pixel-identical.</p><p><strong className="text-zinc-200">Fallback:</strong> Pollinations flux-anime remains available if Gemini is not configured or a Gemini request fails.</p></div>
       </Card>
       <Card className="p-6">
         <div className="font-bold">Project export</div>
