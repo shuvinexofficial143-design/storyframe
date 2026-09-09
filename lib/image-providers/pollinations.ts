@@ -21,7 +21,8 @@ export const pollinationsImageProvider:ImageProvider={
     imageReference:false,
     imageToImage:false,
     characterReference:false,
-    negativePrompt:false
+    negativePrompt:false,
+    deterministicSeed:true
   },
   responseKind:"binary",
   isConfigured(){return true},
