@@ -1,14 +1,16 @@
 import {cloudflareImageProvider} from "./cloudflare";
+import {geminiImageProvider} from "./gemini";
 import {pollinationsImageProvider} from "./pollinations";
 import type {ImageGenerationInput,ImageGenerationResult,ImageProvider} from "./types";
 
 const providers:Record<string,ImageProvider>={
+  gemini:geminiImageProvider,
   cloudflare:cloudflareImageProvider,
   pollinations:pollinationsImageProvider
 };
 
-export function getImageProvider(id="pollinations"){
-  return providers[id]||pollinationsImageProvider;
+export function getImageProvider(id="gemini"){
+  return providers[id]||geminiImageProvider;
 }
 
 export function listImageProviders(){
@@ -16,7 +18,28 @@ export function listImageProviders(){
 }
 
 function preferredProviderId(){
-  return process.env.STORYFRAME_DEFAULT_IMAGE_PROVIDER?.trim().toLowerCase()||"cloudflare";
+  return process.env.STORYFRAME_DEFAULT_IMAGE_PROVIDER?.trim().toLowerCase()||"gemini";
+}
+
+function extractGeminiImage(payload:unknown){
+  const data=payload as {
+    output_image?:{data?:unknown;mime_type?:unknown};
+    steps?:Array<{content?:Array<{type?:unknown;data?:unknown;mime_type?:unknown}>}>;
+  };
+
+  const direct=data.output_image;
+  if(direct&&typeof direct.data==="string"&&direct.data){
+    return {data:direct.data,mimeType:typeof direct.mime_type==="string"?direct.mime_type:"image/jpeg"};
+  }
+
+  for(const step of data.steps||[]){
+    for(const part of step.content||[]){
+      if(part.type==="image"&&typeof part.data==="string"&&part.data){
+        return {data:part.data,mimeType:typeof part.mime_type==="string"?part.mime_type:"image/jpeg"};
+      }
+    }
+  }
+  return null;
 }
 
 async function executeProvider(provider:ImageProvider,input:ImageGenerationInput):Promise<ImageGenerationResult>{
@@ -38,6 +61,11 @@ async function executeProvider(provider:ImageProvider,input:ImageGenerationInput
     const image=payload.result?.image;
     if(typeof image!=="string"||!image) throw new Error(payload.errors?.[0]?.message||`${provider.name} returned no image data.`);
     imageDataUrl=`data:image/png;base64,${image}`;
+  }else if(provider.responseKind==="gemini-json"){
+    const payload=await response.json();
+    const image=extractGeminiImage(payload);
+    if(!image) throw new Error(`${provider.name} returned no generated image.`);
+    imageDataUrl=`data:${image.mimeType};base64,${image.data}`;
   }else{
     const contentType=response.headers.get("content-type")||"image/jpeg";
     const bytes=Buffer.from(await response.arrayBuffer());
@@ -47,9 +75,13 @@ async function executeProvider(provider:ImageProvider,input:ImageGenerationInput
 
   const requestedReferences=input.referenceImages?.length||0;
   const referenceCount=provider.capabilities.imageReference?Math.min(requestedReferences,4):0;
-  const warning=requestedReferences&&!provider.capabilities.imageReference
-    ?`${provider.name} is text-to-image only. StoryFrame preserved canonical prompt locks and the deterministic seed, but did not send reference images.`
-    :undefined;
+  const warnings:string[]=[];
+  if(requestedReferences&&!provider.capabilities.imageReference){
+    warnings.push(`${provider.name} is running in StoryFrame text-only continuity mode. Stored reference images were not sent.`);
+  }
+  if(!provider.capabilities.deterministicSeed){
+    warnings.push(`${provider.name} does not expose a deterministic image seed parameter. StoryFrame preserves the seed as continuity metadata and a prompt anchor, but Regenerate Same may not be pixel-identical.`);
+  }
 
   return {
     imageDataUrl,
@@ -60,7 +92,7 @@ async function executeProvider(provider:ImageProvider,input:ImageGenerationInput
     referenceCount,
     referenceMode:referenceCount?"reference":"text-only",
     capabilities:provider.capabilities,
-    warning
+    warning:warnings.length?warnings.join(" "):undefined
   };
 }
 
@@ -78,7 +110,7 @@ export async function generateImageWithFallback(input:ImageGenerationInput):Prom
       ...fallback,
       fallbackUsed:true,
       primaryError,
-      warning:`Cloudflare primary generation was unavailable, so StoryFrame used Pollinations flux-anime fallback. ${primaryError}`
+      warning:`${desired.name} primary generation was unavailable, so StoryFrame used Pollinations flux-anime fallback. ${primaryError}`
     };
   }
 }
