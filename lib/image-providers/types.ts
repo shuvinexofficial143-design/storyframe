@@ -4,9 +4,10 @@ export type ImageProviderCapabilities={
   imageToImage:boolean;
   characterReference:boolean;
   negativePrompt:boolean;
+  deterministicSeed:boolean;
 };
 
-export type ImageProviderResponseKind="binary"|"cloudflare-json";
+export type ImageProviderResponseKind="binary"|"cloudflare-json"|"gemini-json";
 
 export type ImageGenerationInput={
   prompt:string;
