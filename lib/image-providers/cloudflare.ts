@@ -25,7 +25,8 @@ export const cloudflareImageProvider:ImageProvider={
     imageReference:true,
     imageToImage:true,
     characterReference:true,
-    negativePrompt:false
+    negativePrompt:false,
+    deterministicSeed:true
   },
   responseKind:"cloudflare-json",
   isConfigured(){
