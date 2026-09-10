@@ -2,7 +2,6 @@ import sharp from "sharp";
 import type {ImageGenerationInput,ImageProvider} from "./types";
 
 const DEFAULT_MODEL="gemini-3.1-flash-image";
-const ENDPOINT="https://generativelanguage.googleapis.com/v1beta/interactions";
 const MAX_REFERENCE_EDGE=896;
 
 const ASPECTS=[
@@ -23,6 +22,28 @@ function nearestAspect(width:number,height:number){
   return ASPECTS.reduce((best,item)=>Math.abs(item.value-ratio)<Math.abs(best.value-ratio)?item:best).id;
 }
 
+function projectId(){
+  return process.env.VERTEX_AI_PROJECT_ID?.trim()
+    ||process.env.GOOGLE_CLOUD_PROJECT_ID?.trim()
+    ||process.env.GOOGLE_CLOUD_PROJECT?.trim()
+    ||"";
+}
+
+function apiKey(){
+  // Backwards-compatible alias: an existing Vercel GEMINI_API_KEY can be reused
+  // only when it is a Google Cloud authorization key that is allowed to call Vertex AI.
+  return process.env.VERTEX_AI_API_KEY?.trim()
+    ||process.env.GOOGLE_CLOUD_API_KEY?.trim()
+    ||process.env.GEMINI_API_KEY?.trim()
+    ||"";
+}
+
+function location(){
+  return process.env.VERTEX_AI_LOCATION?.trim()
+    ||process.env.GOOGLE_CLOUD_LOCATION?.trim()
+    ||"global";
+}
+
 function parseDataUrl(value:string){
   const match=value.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,([\s\S]+)$/);
   if(!match)return null;
@@ -37,7 +58,7 @@ async function loadReference(value:string,index:number){
     bytes=inline.bytes;
   }else{
     const response=await fetch(value,{cache:"no-store"});
-    if(!response.ok)throw new Error(`Gemini reference image ${index+1} could not be loaded (${response.status}).`);
+    if(!response.ok)throw new Error(`Vertex Gemini reference image ${index+1} could not be loaded (${response.status}).`);
     bytes=Buffer.from(await response.arrayBuffer());
   }
 
@@ -48,15 +69,23 @@ async function loadReference(value:string,index:number){
     .toBuffer();
 
   return {
-    type:"image" as const,
-    mime_type:"image/jpeg",
-    data:prepared.toString("base64")
+    inlineData:{
+      mimeType:"image/jpeg",
+      data:prepared.toString("base64")
+    }
   };
+}
+
+function endpoint(model:string){
+  const project=projectId();
+  const region=location();
+  const host=region==="global"?"aiplatform.googleapis.com":`${region}-aiplatform.googleapis.com`;
+  return `https://${host}/v1/projects/${encodeURIComponent(project)}/locations/${encodeURIComponent(region)}/publishers/google/models/${encodeURIComponent(model)}:generateContent`;
 }
 
 export const geminiImageProvider:ImageProvider={
   id:"gemini",
-  name:"Gemini 3.1 Flash Image · Nano Banana 2",
+  name:"Google Cloud Vertex AI · Gemini 3.1 Flash Image",
   defaultModel:process.env.GEMINI_IMAGE_MODEL?.trim()||DEFAULT_MODEL,
   capabilities:{
     textToImage:true,
@@ -68,37 +97,42 @@ export const geminiImageProvider:ImageProvider={
   },
   responseKind:"gemini-json",
   isConfigured(){
-    return Boolean(process.env.GEMINI_API_KEY?.trim());
+    return Boolean(projectId()&&apiKey());
   },
   async buildRequest(input:ImageGenerationInput){
-    const apiKey=process.env.GEMINI_API_KEY?.trim();
-    if(!apiKey)throw new Error("Gemini image generation is not configured. Add GEMINI_API_KEY in Vercel Environment Variables.");
+    const project=projectId();
+    const key=apiKey();
+    if(!project)throw new Error("Vertex AI image generation is not configured. Add VERTEX_AI_PROJECT_ID (your Google Cloud project ID) in Vercel Environment Variables.");
+    if(!key)throw new Error("Vertex AI image generation is not configured. Add VERTEX_AI_API_KEY (a Google Cloud authorization key allowed for Vertex AI) in Vercel Environment Variables.");
 
     const model=input.model||geminiImageProvider.defaultModel;
     const references=(input.referenceImages||[]).filter(Boolean).slice(0,4);
     const referenceInputs=await Promise.all(references.map((value,index)=>loadReference(value,index)));
     const avoidance=input.negativePrompt?.trim()?`AVOID / NEGATIVE CONTINUITY: ${input.negativePrompt.trim()}`:"";
-    const seedAnchor=`StoryFrame continuity anchor: ${input.seed}. Gemini does not expose a deterministic seed parameter, so use this number only as a stable creative continuity cue and never render it as text.`;
+    const seedAnchor=`StoryFrame continuity anchor: ${input.seed}. Gemini does not expose a deterministic image seed parameter, so use this number only as a stable creative continuity cue and never render it as text.`;
     const referenceInstruction=references.length
       ?"REFERENCE PRIORITY: preserve the exact identity and visual facts from the supplied reference images. StoryFrame orders references as recurring character references first, environment/location references second, and the previous scene last. Keep the same face, hairstyle, apparent age, body proportions, costume design and colors, recurring architecture, props and visual world. Change only the action, pose, camera, lighting, emotion or story-authorized state required by the current scene."
       :"";
-    const prompt=[input.prompt,referenceInstruction,avoidance,seedAnchor,"Generate exactly one cinematic storyboard image. No captions, speech bubbles, watermark text, logo or UI."].filter(Boolean).join("\n\n");
+    const prompt=[input.prompt,referenceInstruction,avoidance,seedAnchor,"Generate exactly one cinematic storyboard image. Return image and text modalities as required by Vertex Gemini image models. No captions, speech bubbles, watermark text, logo or UI."].filter(Boolean).join("\n\n");
 
     return {
-      url:ENDPOINT,
+      url:endpoint(model),
       method:"POST" as const,
       headers:{
-        "x-goog-api-key":apiKey,
-        "Content-Type":"application/json"
+        "x-goog-api-key":key,
+        "Content-Type":"application/json; charset=utf-8"
       },
       body:JSON.stringify({
-        model,
-        input:[{type:"text",text:prompt},...referenceInputs],
-        response_format:{
-          type:"image",
-          mime_type:"image/jpeg",
-          aspect_ratio:nearestAspect(input.width,input.height),
-          image_size:"1K"
+        contents:[{
+          role:"user",
+          parts:[{text:prompt},...referenceInputs]
+        }],
+        generationConfig:{
+          responseModalities:["TEXT","IMAGE"],
+          imageConfig:{
+            aspectRatio:nearestAspect(input.width,input.height),
+            imageSize:"1K"
+          }
         }
       })
     };
