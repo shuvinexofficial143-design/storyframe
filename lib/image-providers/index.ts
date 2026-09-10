@@ -18,17 +18,39 @@ export function listImageProviders(){
 }
 
 function preferredProviderId(){
-  // User-selected StoryFrame behavior: Gemini is the image-generation provider whenever its key exists.
-  // Text/story analysis remains on the existing Pollinations/local continuity pipeline.
+  // Gemini/Vertex is image-generation only. Story analysis remains unchanged.
   if(geminiImageProvider.isConfigured?.())return "gemini";
   return process.env.STORYFRAME_DEFAULT_IMAGE_PROVIDER?.trim().toLowerCase()||"gemini";
 }
 
 function extractGeminiImage(payload:unknown){
   const data=payload as {
+    // Vertex AI GenerateContent response
+    candidates?:Array<{
+      content?:{
+        parts?:Array<{
+          inlineData?:{data?:unknown;mimeType?:unknown};
+          inline_data?:{data?:unknown;mime_type?:unknown};
+        }>;
+      };
+    }>;
+    // Legacy Gemini interactions compatibility
     output_image?:{data?:unknown;mime_type?:unknown};
     steps?:Array<{content?:Array<{type?:unknown;data?:unknown;mime_type?:unknown}>}>;
   };
+
+  for(const candidate of data.candidates||[]){
+    for(const part of candidate.content?.parts||[]){
+      const inline=part.inlineData;
+      if(inline&&typeof inline.data==="string"&&inline.data){
+        return {data:inline.data,mimeType:typeof inline.mimeType==="string"?inline.mimeType:"image/jpeg"};
+      }
+      const snake=part.inline_data;
+      if(snake&&typeof snake.data==="string"&&snake.data){
+        return {data:snake.data,mimeType:typeof snake.mime_type==="string"?snake.mime_type:"image/jpeg"};
+      }
+    }
+  }
 
   const direct=data.output_image;
   if(direct&&typeof direct.data==="string"&&direct.data){
