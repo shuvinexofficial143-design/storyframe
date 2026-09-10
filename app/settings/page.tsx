@@ -16,16 +16,16 @@ export default function Settings(){
   };
 
   return <>
-    <PageHeading eyebrow="Configuration" title="Settings & Export" description="Gemini 3.1 Flash Image is the preferred image-only provider. Story analysis remains on the existing StoryFrame pipeline. If Gemini image generation is unavailable, StoryFrame can fall back to Pollinations flux-anime."/>
+    <PageHeading eyebrow="Configuration" title="Settings & Export" description="Google Cloud Vertex AI Gemini 3.1 Flash Image is the preferred image-only provider so eligible Google Cloud billing credits can be used. Story analysis remains on the existing StoryFrame pipeline. Pollinations flux-anime remains the image fallback."/>
     <div className="grid gap-5 lg:grid-cols-2">
       <Card className="p-6">
-        <div className="flex items-center gap-2 font-bold"><ShieldCheck size={17}/> Provider configuration</div>
-        <p className="mt-3 text-sm leading-6 text-zinc-400">Keep the Gemini API key server-side in Vercel Environment Variables. Never commit the real key to GitHub.</p>
-        <div className="mt-5 rounded-xl border border-white/8 bg-black/20 p-4 font-mono text-xs leading-6 text-zinc-400">STORYFRAME_DEFAULT_IMAGE_PROVIDER=gemini<br/>GEMINI_API_KEY=<br/>GEMINI_IMAGE_MODEL=gemini-3.1-flash-image<br/><br/>POLLINATIONS_IMAGE_MODEL=flux-anime</div>
+        <div className="flex items-center gap-2 font-bold"><ShieldCheck size={17}/> Vertex AI configuration</div>
+        <p className="mt-3 text-sm leading-6 text-zinc-400">Keep your Google Cloud authorization key server-side in Vercel Environment Variables. The key must be allowed to call Vertex AI (aiplatform.googleapis.com). Never commit the real key to GitHub.</p>
+        <div className="mt-5 rounded-xl border border-white/8 bg-black/20 p-4 font-mono text-xs leading-6 text-zinc-400">STORYFRAME_DEFAULT_IMAGE_PROVIDER=gemini<br/>VERTEX_AI_PROJECT_ID=<br/>VERTEX_AI_LOCATION=global<br/>VERTEX_AI_API_KEY=<br/>GEMINI_IMAGE_MODEL=gemini-3.1-flash-image<br/><br/>POLLINATIONS_IMAGE_MODEL=flux-anime</div>
       </Card>
       <Card className="p-6">
         <div className="flex items-center gap-2 font-bold"><Sparkles size={17}/> Generation behavior</div>
-        <div className="mt-4 space-y-3 text-sm text-zinc-400"><p><strong className="text-zinc-200">Gemini 3.1 Flash Image:</strong> used only for StoryFrame image generation; story analysis is unchanged.</p><p><strong className="text-zinc-200">Reference continuity:</strong> recurring character references are sent first, then location/environment references, then the previous scene when available.</p><p><strong className="text-zinc-200">Resolution:</strong> 1K output with the requested scene aspect ratio such as 16:9.</p><p><strong className="text-zinc-200">Seed note:</strong> Gemini does not expose a deterministic image seed parameter, so StoryFrame keeps the scene seed as metadata/prompt anchor; Regenerate Same may not be pixel-identical.</p><p><strong className="text-zinc-200">Fallback:</strong> Pollinations flux-anime remains available if Gemini is not configured or a Gemini request fails.</p></div>
+        <div className="mt-4 space-y-3 text-sm text-zinc-400"><p><strong className="text-zinc-200">Vertex AI Gemini 3.1 Flash Image:</strong> used only for StoryFrame image generation; story analysis is unchanged.</p><p><strong className="text-zinc-200">Google Cloud billing:</strong> requests go to <code className="text-zinc-300">aiplatform.googleapis.com</code>, not the Google AI Studio Gemini endpoint.</p><p><strong className="text-zinc-200">Reference continuity:</strong> recurring character references are sent first, then location/environment references, then the previous scene when available.</p><p><strong className="text-zinc-200">Resolution:</strong> 1K output with the requested scene aspect ratio such as 16:9.</p><p><strong className="text-zinc-200">Seed note:</strong> Gemini does not expose a deterministic image seed parameter, so StoryFrame keeps the scene seed as metadata/prompt anchor; Regenerate Same may not be pixel-identical.</p><p><strong className="text-zinc-200">Fallback:</strong> Pollinations flux-anime remains available if Vertex AI is not configured or a request fails.</p></div>
       </Card>
       <Card className="p-6">
         <div className="font-bold">Project export</div>
