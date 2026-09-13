@@ -14,9 +14,10 @@ export async function POST(request:Request){
     if(!result.ok)return NextResponse.json({error:result.error,details:result.details},{status:result.status});
 
     if(gemini&&!gemini.ok){
+      const fallbackWarning="warning" in result.data&&typeof result.data.warning==="string"?result.data.warning:"";
       return NextResponse.json({
         ...result.data,
-        warning:[`Gemini free-tier story analysis was unavailable (${gemini.error}).`,result.data.warning].filter(Boolean).join(" ")
+        warning:[`Gemini free-tier story analysis was unavailable (${gemini.error}).`,fallbackWarning].filter(Boolean).join(" ")
       });
     }
 
