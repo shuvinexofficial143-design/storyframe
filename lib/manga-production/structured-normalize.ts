@@ -1,18 +1,18 @@
-function humanizeKey(value:string){return value.replace(/([a-z0-9])([A-Z])/g,"$1 $2").replace(/[_-]+/g," ").trim()}
+function humanizeKey(value:string):string{return value.replace(/([a-z0-9])([A-Z])/g,"$1 $2").replace(/[_-]+/g," ").trim()}
 
-export function structuredText(value:unknown,fallback=""){
+export function structuredText(value:unknown,fallback=""):string{
   if(value==null)return fallback;
   if(typeof value==="string")return value.trim()||fallback;
   if(typeof value==="number"||typeof value==="boolean")return String(value);
   if(Array.isArray(value)){
-    const parts=value.map((item)=>structuredText(item,"")).filter(Boolean);
+    const parts:string[]=value.map((item):string=>structuredText(item,"")).filter((item):item is string=>Boolean(item));
     return parts.length?parts.join("; "):fallback;
   }
   if(typeof value==="object"){
-    const parts=Object.entries(value as Record<string,unknown>).map(([key,item])=>{
-      const text=structuredText(item,"");
+    const parts:string[]=Object.entries(value as Record<string,unknown>).map(([key,item]):string=>{
+      const text:string=structuredText(item,"");
       return text?`${humanizeKey(key)}: ${text}`:"";
-    }).filter(Boolean);
+    }).filter((item):item is string=>Boolean(item));
     return parts.length?parts.join("; "):fallback;
   }
   return fallback;
@@ -26,7 +26,7 @@ const TEXT_FIELDS=new Set([
   "continuityFromPreviousPanel","continuityToNextPanel","imagePrompt","negativePrompt","continuityToNextPage","timeline","previousPageEndState","chunkEndState"
 ]);
 
-function normalizeLayout(value:unknown){
+function normalizeLayout(value:unknown):unknown{
   if(!value||typeof value!=="object"||Array.isArray(value))return value;
   const output:Record<string,string>={};
   for(const [key,item] of Object.entries(value as Record<string,unknown>)){
@@ -37,7 +37,7 @@ function normalizeLayout(value:unknown){
 }
 
 export function normalizeMangaStructuredData<T>(value:T):T{
-  const visit=(input:unknown,parent?:Record<string,unknown>):unknown=>{
+  const visit=(input:unknown):unknown=>{
     if(Array.isArray(input))return input.map((item)=>visit(item));
     if(!input||typeof input!=="object")return input;
     const source=input as Record<string,unknown>;
@@ -57,7 +57,7 @@ export function normalizeMangaStructuredData<T>(value:T):T{
         output[key]=structuredText(item,"");
         continue;
       }
-      output[key]=visit(item,source);
+      output[key]=visit(item);
     }
     return output;
   };
