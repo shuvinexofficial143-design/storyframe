@@ -1,8 +1,13 @@
 import {NextResponse} from "next/server";
 import {z} from "zod";
 import {hashString,hasPollinations,pollinationsAnalyzeStory} from "@/lib/pollinations";
+import {hasXKiro,xkiroAnalyzeStory} from "@/lib/xkiro";
 
-const Input=z.object({story:z.string().min(20).max(100000),visualStyle:z.string().default("Cinematic Film (Ultra-Photorealistic)")});
+const Input=z.object({
+  story:z.string().min(20).max(100000),
+  visualStyle:z.string().default("Cinematic Film (Ultra-Photorealistic)"),
+  analysisModel:z.enum(["mistralai/mistral-medium-3.5","mistralai/mistral-large-2512"]).default("mistralai/mistral-medium-3.5")
+});
 const shots=["Extreme Wide Shot","Wide Shot","Medium Shot","Medium Close-Up","Close-Up","Over-the-Shoulder","Low Angle"];
 const angles=["Eye Level","Three Quarter","Low Angle","High Angle","POV"];
 const stop=new Set(["The","He","She","They","This","That","When","After","Before","Inside","Outside","Blue","Ancient"]);
@@ -10,7 +15,7 @@ const locRules:[[string,RegExp],...Array<[string,RegExp]>]=[["Internet Cafe",/in
 
 const ExternalCharacter=z.object({name:z.string(),role:z.string().default("Supporting character"),appearance:z.string().default("Maintain a stable face and body design"),outfit:z.string().default("Keep costume continuity"),consistencyNotes:z.string().default("Maintain the same visual identity across scenes")});
 const ExternalLocation=z.object({name:z.string(),architecture:z.string().default("Preserve the major environment design"),lighting:z.string().default("Use coherent cinematic lighting"),continuity:z.string().default("Preserve props and layout across scenes")});
-const ExternalScene=z.object({sourceText:z.string(),description:z.string(),characterNames:z.array(z.string()).default([]),locationName:z.string().optional(),cameraShot:z.string().default("Medium Shot"),cameraAngle:z.string().default("Eye Level"),duration:z.number().min(2).max(10).default(4),imagePrompt:z.string(),negativePrompt:z.string().default("text, watermark, low quality, deformed hands"),continuityNotes:z.string().default("Carry appearance, costume and environment continuity forward")});
+const ExternalScene=z.object({sourceText:z.string(),description:z.string(),characterNames:z.array(z.string()).default([]),locationName:z.string().optional(),cameraShot:z.string().default("Medium Shot"),cameraAngle:z.string().default("Eye Level"),duration:z.coerce.number().min(2).max(10).default(4),imagePrompt:z.string(),negativePrompt:z.string().default("text, watermark, low quality, deformed hands"),continuityNotes:z.string().default("Carry appearance, costume and environment continuity forward")});
 const ExternalPayload=z.object({summary:z.string(),characters:z.array(ExternalCharacter).default([]),locations:z.array(ExternalLocation).default([]),scenes:z.array(ExternalScene).default([])});
 
 function heuristicAnalyze(story:string,visualStyle:string){
@@ -30,7 +35,7 @@ function heuristicAnalyze(story:string,visualStyle:string){
   const locationNames=found.length?found:["Primary Story Location"];
   const locations=locationNames.map((name,index)=>({id:`loc-${index+1}`,name,architecture:`Persistent architecture for ${name}`,lighting:"Cinematic motivated lighting with stable direction and mood",continuity:"Preserve doors, windows, furniture, landmarks and major props unless the story changes them",locked:false}));
 
-  const targetSceneCount=Math.min(8,Math.max(4,Math.ceil(sentences.length/2)));
+  const targetSceneCount=Math.min(12,Math.max(4,Math.ceil(sentences.length/2)));
   const chunkSize=Math.max(1,Math.ceil(sentences.length/targetSceneCount));
   const chunks:string[]=[];
   for(let index=0;index<sentences.length;index+=chunkSize) chunks.push(sentences.slice(index,index+chunkSize).join(" "));
@@ -49,7 +54,7 @@ function heuristicAnalyze(story:string,visualStyle:string){
   return {summary:sentences.slice(0,3).join(" "),characters,locations,scenes,analysisProvider:"heuristic-fallback",imageProvider:"pollinations"};
 }
 
-function normalizeExternal(external:z.infer<typeof ExternalPayload>,visualStyle:string){
+function normalizeExternal(external:z.infer<typeof ExternalPayload>,visualStyle:string,analysisProvider:string){
   const characters=external.characters.length?external.characters:[{name:"Main Character",role:"Primary character",appearance:"Maintain a stable face and body design",outfit:"Keep costume continuity",consistencyNotes:"Maintain the same visual identity across scenes"}];
   const locations=external.locations.length?external.locations:[{name:"Primary Story Location",architecture:"Preserve the major environment design",lighting:"Use coherent cinematic lighting",continuity:"Preserve props and layout across scenes"}];
   const mappedCharacters=characters.map((character,index)=>({id:`char-${index+1}`,name:character.name,role:character.role,appearance:character.appearance,outfit:character.outfit,consistencyNotes:character.consistencyNotes,locked:false,referenceSeed:hashString(character.name+character.appearance+character.outfit)}));
@@ -59,20 +64,30 @@ function normalizeExternal(external:z.infer<typeof ExternalPayload>,visualStyle:
     const locationId=mappedLocations.find((location)=>location.name.toLowerCase()===(scene.locationName||"").toLowerCase())?.id||mappedLocations[0]?.id;
     return {id:`scene-${index+1}`,sceneNumber:index+1,sourceText:scene.sourceText,description:scene.description,characterIds:characterIds.length?characterIds:mappedCharacters.slice(0,Math.min(2,mappedCharacters.length)).map((character)=>character.id),locationId,cameraShot:scene.cameraShot,cameraAngle:scene.cameraAngle,duration:scene.duration,imagePrompt:scene.imagePrompt.includes(visualStyle)?scene.imagePrompt:`${scene.imagePrompt}. Style: ${visualStyle}.`,negativePrompt:scene.negativePrompt,continuityNotes:scene.continuityNotes,generationStatus:"idle" as const,generationSeed:hashString(`${scene.sourceText}-${index+1}`)};
   });
-  return {summary:external.summary,characters:mappedCharacters,locations:mappedLocations,scenes,analysisProvider:"pollinations",imageProvider:"pollinations"};
+  return {summary:external.summary,characters:mappedCharacters,locations:mappedLocations,scenes,analysisProvider,imageProvider:"pollinations"};
 }
 
 export async function POST(req:Request){
   try{
     const parsed=Input.safeParse(await req.json());
-    if(!parsed.success) return NextResponse.json({error:"Invalid story"},{status:400});
-    const {story,visualStyle}=parsed.data;
+    if(!parsed.success) return NextResponse.json({error:"Invalid story or model selection"},{status:400});
+    const {story,visualStyle,analysisModel}=parsed.data;
+
+    if(hasXKiro()){
+      try{
+        const analysis=await xkiroAnalyzeStory({story,visualStyle,model:analysisModel});
+        const validated=ExternalPayload.parse(analysis.json);
+        if(validated.scenes.length) return NextResponse.json(normalizeExternal(validated,visualStyle,`xKiro · ${analysis.model}`));
+      }catch(error){
+        console.error("xKiro analysis failed; trying fallback",error);
+      }
+    }
 
     if(hasPollinations()){
       try{
         const analysis=await pollinationsAnalyzeStory({story,visualStyle});
         const validated=ExternalPayload.parse(analysis.json);
-        if(validated.scenes.length) return NextResponse.json(normalizeExternal(validated,visualStyle));
+        if(validated.scenes.length) return NextResponse.json(normalizeExternal(validated,visualStyle,"pollinations"));
       }catch(error){
         console.error("Pollinations analysis failed; using local fallback",error);
       }
