@@ -29,7 +29,10 @@ export async function POST(request:Request){
 
     const xkiro=await tryXKiroContinuityAnalysis(body);
     if(xkiro.ok)return NextResponse.json(xkiro.data);
-    if(xkiro.status===400)return NextResponse.json({error:xkiro.error,"details" in xkiro?xkiro.details:undefined},{status:400});
+    if(xkiro.status===400){
+      const details="details" in xkiro?xkiro.details:undefined;
+      return NextResponse.json({error:xkiro.error,details},{status:400});
+    }
 
     const result=await analyzeContinuityChapter(body);
     if(!result.ok)return NextResponse.json({error:result.error,details:result.details},{status:result.status});
