@@ -1,16 +1,16 @@
 import {z} from "zod";
 import {xkiroJsonCompletion} from "../xkiro";
 import {isStoryAnalysisModel} from "../story-analysis-models";
-import {MANGA_STYLE_PRESETS,type MangaMasterAnalysis} from "./types";
+import {MANGA_STYLE_PRESETS,type MangaCharacterState,type MangaMasterAnalysis} from "./types";
 import {MANGA_STYLE_PROMPTS} from "./presets";
 import type {MangaMasterInput} from "./planner";
 
 const Dialogue=z.object({speaker:z.string().default(""),text:z.string().default(""),emotion:z.string().default("neutral"),bubbleType:z.enum(["speech","thought","shout","whisper","narration"]).default("speech")});
 const Character=z.object({
   name:z.string().min(1),role:z.string().default("recurring character"),gender:z.string().default("unspecified"),approximateAge:z.string().default("young adult"),
-  face:z.object({shape:z.string().default("consistent face"),eyes:z.string().default("expressive eyes"),eyebrows:z.string().default("consistent eyebrows"),nose:z.string().default("consistent nose"),mouth:z.string().default("consistent mouth"),specialFeatures:z.string().default("none unless established")}).default({}),
-  hair:z.object({color:z.string().default("black"),style:z.string().default("consistent hairstyle"),length:z.string().default("medium")}).default({}),
-  body:z.object({build:z.string().default("average"),height:z.string().default("average"),proportions:z.string().default("natural consistent proportions")}).default({}),
+  face:z.object({shape:z.string().default("consistent face"),eyes:z.string().default("expressive eyes"),eyebrows:z.string().default("consistent eyebrows"),nose:z.string().default("consistent nose"),mouth:z.string().default("consistent mouth"),specialFeatures:z.string().default("none unless established")}).default({shape:"consistent face",eyes:"expressive eyes",eyebrows:"consistent eyebrows",nose:"consistent nose",mouth:"consistent mouth",specialFeatures:"none unless established"}),
+  hair:z.object({color:z.string().default("black"),style:z.string().default("consistent hairstyle"),length:z.string().default("medium")}).default({color:"black",style:"consistent hairstyle",length:"medium"}),
+  body:z.object({build:z.string().default("average"),height:z.string().default("average"),proportions:z.string().default("natural consistent proportions")}).default({build:"average",height:"average",proportions:"natural consistent proportions"}),
   defaultOutfit:z.string().default("story-appropriate consistent outfit"),currentOutfit:z.string().default("story-appropriate consistent outfit"),accessories:z.array(z.string()).default([]),importantObjects:z.array(z.string()).default([]),consistencyNotes:z.string().default("Keep face, hair, age, body build, outfit and accessories consistent until the story explicitly changes them.")
 });
 const Location=z.object({name:z.string().min(1),architecture:z.string().default("story-appropriate architecture"),layout:z.record(z.string(),z.string()).default({}),importantProps:z.array(z.string()).default([]),lighting:z.string().default("story-appropriate motivated lighting"),timeOfDay:z.string().default("unspecified"),continuityNotes:z.string().default("Preserve established layout and fixed objects.")});
@@ -81,7 +81,7 @@ export async function analyzeLongMangaMaster(input:MangaMasterInput):Promise<Man
     if(beats.length>300)throw new Error("This story expands beyond StoryFrame's current 300 manga-beat chapter limit. Split it into multiple chapters so continuity can remain reliable.");
   }
 
-  const initialCharacterStates:Record<string,any>={};
+  const initialCharacterStates:Record<string,MangaCharacterState>={};
   for(const item of global.initialCharacterStates){initialCharacterStates[item.characterName]={characterId:item.characterName,currentLocation:item.currentLocation,position:item.position,bodyDirection:item.bodyDirection,pose:item.pose,expression:item.expression,currentOutfit:item.currentOutfit,heldObjects:item.heldObjects,injuries:item.injuries,dirtyClothes:item.dirtyClothes,wetClothes:item.wetClothes}}
   return {
     storySummary:global.storySummary,
