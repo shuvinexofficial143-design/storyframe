@@ -3,21 +3,19 @@ import {normalizeName} from "../continuity/project-defaults";
 import {MANGA_NEGATIVE_PROMPT,MANGA_STYLE_PROMPTS} from "./presets";
 import type {MangaChapterProduction,MangaPage,MangaPanel} from "./types";
 
+const MAX_INLINE_REFERENCE_CHARS=420_000;
+function requestSafeImage(value?:string){return value&&(!value.startsWith("data:image/")||value.length<=MAX_INLINE_REFERENCE_CHARS)?value:undefined}
+
 function selectedImage(panel?:MangaPanel){
   if(!panel)return undefined;
-  return panel.versions.find((version)=>version.id===panel.selectedVersionId)?.imageDataUrl||panel.versions.at(-1)?.imageDataUrl;
+  return requestSafeImage(panel.versions.find((version)=>version.id===panel.selectedVersionId)?.imageDataUrl||panel.versions.at(-1)?.imageDataUrl);
 }
 
 function characterReferencePriority(character:MangaProject["characters"][number]){
   const byType=(type:MangaProject["characters"][number]["referenceImages"][number]["type"])=>character.referenceImages.find((item)=>item.type===type)?.url;
-  return [
-    character.manualReferenceImage,
-    byType("primary"),
-    byType("sheet"),
-    byType("three-quarter"),
-    byType("side"),
-    byType("full-body")
-  ].filter((value):value is string=>Boolean(value));
+  return [character.manualReferenceImage,byType("primary"),byType("sheet"),byType("three-quarter"),byType("side"),byType("full-body")]
+    .map((value)=>requestSafeImage(value))
+    .filter((value):value is string=>Boolean(value));
 }
 
 export function compileMangaPanelPrompt(input:{project:MangaProject;production:MangaChapterProduction;page:MangaPage;panel:MangaPanel;previousPanel?:MangaPanel;stronger?:boolean}){
@@ -40,12 +38,7 @@ export function compileMangaPanelPrompt(input:{project:MangaProject;production:M
         state?`CURRENT PANEL STATE: location ${state.currentLocation}; position ${state.position}; direction ${state.bodyDirection}; pose ${state.pose}; expression ${state.expression}; held objects ${state.heldObjects.join(", ")||"none"}; injuries ${state.injuries.join(", ")||"none"}; dirty clothes ${state.dirtyClothes}; wet clothes ${state.wetClothes}.`:"",
         `Consistency: ${character.negativeChanges.join("; ")}.`
       ].filter(Boolean).join(" "));
-
-      // Prefer a canonical portrait plus one alternate identity view/sheet when available.
-      // The final provider request remains capped at four total references, so two-character
-      // panels naturally prioritize identity evidence before location/previous-panel imagery.
-      const identityRefs=[...new Set(characterReferencePriority(character))].slice(0,2);
-      referenceImages.push(...identityRefs);
+      referenceImages.push(...[...new Set(characterReferencePriority(character))].slice(0,2));
     }else{
       characterBlocks.push(`${name}: preserve the exact established face, hairstyle, age, body proportions, outfit and accessories from earlier manga panels.`);
     }
@@ -56,7 +49,7 @@ export function compileMangaPanelPrompt(input:{project:MangaProject;production:M
   const locationBlock=locationProfile
     ?`${locationProfile.name}: ${locationProfile.architecture}. FIXED LAYOUT: ${Object.entries(locationProfile.layout).map(([key,value])=>`${key}: ${value}`).join("; ")}. Important fixed props: ${locationProfile.importantProps.join(", ")||"none"}. Lighting: ${locationProfile.lighting}. Continuity: ${locationProfile.continuityNotes}.`
     :projectLocation?`${projectLocation.name}: ${projectLocation.referencePrompt}. Layout identity: ${projectLocation.geometryIdentity}. Important features: ${projectLocation.importantFeatures.join(", ")}.`:panel.location;
-  if(projectLocation?.referenceImages[0]?.url)referenceImages.push(projectLocation.referenceImages[0].url);
+  const locationReference=requestSafeImage(projectLocation?.referenceImages[0]?.url);if(locationReference)referenceImages.push(locationReference);
 
   const propBlocks=panel.importantProps.map((name)=>{
     const tracked=production.propStates.find((item)=>normalizeName(item.name)===normalizeName(name));
@@ -66,9 +59,7 @@ export function compileMangaPanelPrompt(input:{project:MangaProject;production:M
     return `${name}: preserve its established appearance and current story state.`;
   });
 
-  const previousImage=selectedImage(previousPanel);
-  if(previousImage)referenceImages.push(previousImage);
-
+  const previousImage=selectedImage(previousPanel);if(previousImage)referenceImages.push(previousImage);
   const strict=input.stronger||project.visualBible.continuityStrength==="strict";
   const prompt=[
     "Create exactly ONE professional black-and-white manga panel. This is a single panel image, not a full comic page.",
