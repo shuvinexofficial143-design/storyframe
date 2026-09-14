@@ -31,6 +31,9 @@ const STRING_ARRAY_FIELDS=new Set([
 ]);
 
 const BOOLEAN_FIELDS=new Set(["dirtyClothes","wetClothes"]);
+const OBJECT_WITH_DEFAULT_FIELDS=new Set(["face","hair","body"]);
+const BEAT_TYPES=new Set(["action","reaction","reveal","dialogue","transition","environment","object","emotion"]);
+const BUBBLE_TYPES=new Set(["speech","thought","shout","whisper","narration"]);
 
 function normalizeStringArray(value:unknown):string[]{
   if(value==null)return [];
@@ -75,6 +78,21 @@ function normalizeCharacterList(value:unknown):unknown{
   return value;
 }
 
+function normalizeDialogue(value:unknown,visit:(input:unknown)=>unknown):unknown[]{
+  if(value==null)return [];
+  if(Array.isArray(value))return value.map((item)=>visit(item));
+  if(typeof value==="string")return [{speaker:"",text:value,emotion:"neutral",bubbleType:"speech"}];
+  if(typeof value==="object")return [visit(value)];
+  return [];
+}
+
+function normalizeEnum(value:unknown,allowed:Set<string>,fallback:string):string{
+  const text=structuredText(value,"").trim().toLowerCase().replace(/[_-]+/g," ");
+  if(allowed.has(text))return text;
+  const compact=text.replace(/\s+/g,"-");
+  return allowed.has(compact)?compact:fallback;
+}
+
 export function normalizeMangaStructuredData<T>(value:T):T{
   const visit=(input:unknown):unknown=>{
     if(Array.isArray(input))return input.map((item)=>visit(item));
@@ -96,12 +114,32 @@ export function normalizeMangaStructuredData<T>(value:T):T{
         output[key]=visit(normalizeCharacterList(item));
         continue;
       }
+      if(key==="dialogue"){
+        output[key]=normalizeDialogue(item,visit);
+        continue;
+      }
+      if(key==="type"){
+        output[key]=normalizeEnum(item,BEAT_TYPES,"action");
+        continue;
+      }
+      if(key==="bubbleType"){
+        output[key]=normalizeEnum(item,BUBBLE_TYPES,"speech");
+        continue;
+      }
+      if(OBJECT_WITH_DEFAULT_FIELDS.has(key)){
+        output[key]=item&&typeof item==="object"&&!Array.isArray(item)?visit(item):{};
+        continue;
+      }
       if(STRING_ARRAY_FIELDS.has(key)){
         output[key]=normalizeStringArray(item);
         continue;
       }
       if(BOOLEAN_FIELDS.has(key)){
         output[key]=normalizeBoolean(item);
+        continue;
+      }
+      if(key==="consumedBeatCount"){
+        const parsed=Number(item);output[key]=Number.isFinite(parsed)?Math.trunc(parsed):0;
         continue;
       }
       // Always normalize known text fields, not only object/array values. This
