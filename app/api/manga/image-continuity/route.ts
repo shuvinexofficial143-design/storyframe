@@ -15,14 +15,14 @@ const Input=z.object({
 export async function POST(request:Request){
   try{
     const parsed=Input.safeParse(await request.json());
-    if(!parsed.success) return NextResponse.json({error:"Invalid image request",details:parsed.error.flatten()},{status:400});
+    if(!parsed.success)return NextResponse.json({error:"Invalid image request",details:parsed.error.flatten()},{status:400});
 
     const {prompt,seed,width,height,negativePrompt,referenceImages}=parsed.data;
     const result=await generateImageWithFallback({prompt,seed,width,height,negativePrompt,referenceImages});
 
     return NextResponse.json({
       imageDataUrl:result.imageDataUrl,
-      sourceUrl:result.sourceUrl||result.imageDataUrl,
+      sourceUrl:result.sourceUrl,
       model:result.model,
       provider:result.provider,
       seed:result.seed,
