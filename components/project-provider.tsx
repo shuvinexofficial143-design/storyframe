@@ -11,7 +11,7 @@ type Ctx={project:ProjectState;updateProject:(patch:Partial<ProjectState>)=>void
 const Context=createContext<Ctx|null>(null);
 
 function hydrateProject(parsed:ProjectState):ProjectState{
-  return {...parsed,characters:(parsed.characters||[]).map((character)=>({...character,referenceImage:character.referenceImage||character.referenceImageSourceUrl})),scenes:(parsed.scenes||[]).map((scene)=>({...scene,generatedImage:scene.generatedImage||scene.generatedImageSourceUrl}))};
+  return {...parsed,analysisModel:parsed.analysisModel||defaultProject.analysisModel,characters:(parsed.characters||[]).map((character)=>({...character,referenceImage:character.referenceImage||character.referenceImageSourceUrl})),scenes:(parsed.scenes||[]).map((scene)=>({...scene,generatedImage:scene.generatedImage||scene.generatedImageSourceUrl}))};
 }
 
 function loadInitialProject():ProjectState{
