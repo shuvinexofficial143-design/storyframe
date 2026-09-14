@@ -19,7 +19,11 @@ export async function POST(request:Request){
   try{
     const raw=await request.json();
     const body=raw&&typeof raw==="object"?{...(raw as Record<string,unknown>)}:{};
-    if(!isStoryAnalysisModel(body.analysisModel)){
+
+    if(body.analysisModel!==undefined&&!isStoryAnalysisModel(body.analysisModel)){
+      return NextResponse.json({error:"Invalid AI story model selection."},{status:400});
+    }
+    if(body.analysisModel===undefined){
       body.analysisModel=selectedModelFromCookie(request)||DEFAULT_STORY_ANALYSIS_MODEL;
     }
 
