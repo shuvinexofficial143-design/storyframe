@@ -22,7 +22,7 @@ export async function POST(request:Request){
 
     return NextResponse.json({
       imageDataUrl:result.imageDataUrl,
-      sourceUrl:result.sourceUrl||result.imageDataUrl,
+      sourceUrl:result.sourceUrl,
       model:result.model,
       provider:result.provider,
       seed:result.seed,
