@@ -1,29 +1,42 @@
 import {NextResponse} from "next/server";
 import {analyzeContinuityChapter} from "@/lib/continuity/analyzer";
-import {tryGeminiContinuityAnalysis} from "@/lib/continuity/gemini-analysis";
+import {tryXKiroContinuityAnalysis} from "@/lib/continuity/xkiro-analysis";
+import {DEFAULT_STORY_ANALYSIS_MODEL,isStoryAnalysisModel} from "@/lib/story-analysis-models";
+
+function selectedModelFromCookie(request:Request){
+  const header=request.headers.get("cookie")||"";
+  const match=header.match(/(?:^|;\s*)storyframe-analysis-model=([^;]+)/);
+  if(!match)return undefined;
+  try{
+    const value=decodeURIComponent(match[1]);
+    return isStoryAnalysisModel(value)?value:undefined;
+  }catch{
+    return undefined;
+  }
+}
 
 export async function POST(request:Request){
   try{
-    const body=await request.json();
+    const raw=await request.json();
+    const body=raw&&typeof raw==="object"?{...(raw as Record<string,unknown>)}:{};
+    if(!isStoryAnalysisModel(body.analysisModel)){
+      body.analysisModel=selectedModelFromCookie(request)||DEFAULT_STORY_ANALYSIS_MODEL;
+    }
 
-    const gemini=await tryGeminiContinuityAnalysis(body);
-    if(gemini?.ok)return NextResponse.json(gemini.data);
-    if(gemini&&!gemini.ok&&gemini.status===400)return NextResponse.json({error:gemini.error,details:gemini.details},{status:400});
+    const xkiro=await tryXKiroContinuityAnalysis(body);
+    if(xkiro.ok)return NextResponse.json(xkiro.data);
+    if(xkiro.status===400)return NextResponse.json({error:xkiro.error,"details" in xkiro?xkiro.details:undefined},{status:400});
 
     const result=await analyzeContinuityChapter(body);
     if(!result.ok)return NextResponse.json({error:result.error,details:result.details},{status:result.status});
 
-    if(gemini&&!gemini.ok){
-      const fallbackWarning="warning" in result.data&&typeof result.data.warning==="string"?result.data.warning:"";
-      return NextResponse.json({
-        ...result.data,
-        warning:[`Gemini free-tier story analysis was unavailable (${gemini.error}).`,fallbackWarning].filter(Boolean).join(" ")
-      });
-    }
-
-    return NextResponse.json(result.data);
+    const fallbackWarning="warning" in result.data&&typeof result.data.warning==="string"?result.data.warning:"";
+    return NextResponse.json({
+      ...result.data,
+      warning:[`xKiro selected analysis was unavailable (${xkiro.error}).`,fallbackWarning].filter(Boolean).join(" ")
+    });
   }catch(error){
     console.error("Cinematic continuity analysis failed",error);
-    return NextResponse.json({error:error instanceof Error?error.message:"Chapter analysis failed"},{status:502});
+    return NextResponse.json({error:"Story analysis failed. Please try again."},{status:502});
   }
 }
