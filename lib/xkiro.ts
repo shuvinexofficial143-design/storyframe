@@ -19,17 +19,92 @@ export function isXKiroStoryModel(value:unknown):value is XKiroStoryModel{return
 
 async function fetchWithTimeout(input:string|URL,init:RequestInit,timeoutMs:number){const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),timeoutMs);try{return await fetch(input,{...init,signal:controller.signal})}catch(error){if(error instanceof Error&&error.name==="AbortError")throw new XKiroRequestError(`xKiro request timed out after ${Math.round(timeoutMs/1000)} seconds.`,"timeout",504);throw new XKiroRequestError("xKiro request could not be completed.","request_failed",502)}finally{clearTimeout(timer)}}
 
-export function extractFirstJsonObject(value:string){const cleaned=value.replace(/^```(?:json)?\s*/i,"").replace(/\s*```$/i,"").trim();const start=cleaned.indexOf("{");const end=cleaned.lastIndexOf("}");if(start===-1||end===-1||end<=start)throw new XKiroRequestError("xKiro returned an invalid structured response.","invalid_response",502);try{return JSON.parse(cleaned.slice(start,end+1))}catch{throw new XKiroRequestError("xKiro returned malformed JSON.","invalid_response",502)}}
+function extractBalancedObject(value:string):string|undefined{
+  const start=value.indexOf("{");if(start<0)return undefined;
+  let depth=0,inString=false,escaped=false;
+  for(let index=start;index<value.length;index+=1){
+    const char=value[index];
+    if(inString){
+      if(escaped){escaped=false;continue}
+      if(char==="\\"){escaped=true;continue}
+      if(char==='"')inString=false;
+      continue;
+    }
+    if(char==='"'){inString=true;continue}
+    if(char==="{")depth+=1;
+    else if(char==="}"){depth-=1;if(depth===0)return value.slice(start,index+1)}
+  }
+  return undefined;
+}
+
+function repairCommonJson(value:string):string{
+  // LLMs occasionally emit literal line breaks/tabs inside quoted strings.
+  let escapedText="",inString=false,escaped=false;
+  for(const char of value){
+    if(inString){
+      if(escaped){escapedText+=char;escaped=false;continue}
+      if(char==="\\"){escapedText+=char;escaped=true;continue}
+      if(char==='"'){escapedText+=char;inString=false;continue}
+      if(char==="\n"){escapedText+="\\n";continue}
+      if(char==="\r"){escapedText+="\\r";continue}
+      if(char==="\t"){escapedText+="\\t";continue}
+      escapedText+=char;continue;
+    }
+    if(char==='"')inString=true;
+    escapedText+=char;
+  }
+
+  // Remove trailing commas before } or ] without touching quoted strings.
+  let output="";inString=false;escaped=false;
+  for(let index=0;index<escapedText.length;index+=1){
+    const char=escapedText[index];
+    if(inString){output+=char;if(escaped){escaped=false;continue}if(char==="\\"){escaped=true;continue}if(char==='"')inString=false;continue}
+    if(char==='"'){inString=true;output+=char;continue}
+    if(char===","){
+      let next=index+1;while(next<escapedText.length&&/\s/.test(escapedText[next]))next+=1;
+      if(escapedText[next]==="}"||escapedText[next]==="]")continue;
+    }
+    output+=char;
+  }
+  return output;
+}
+
+export function extractFirstJsonObject(value:string){
+  const cleaned=value.replace(/^\uFEFF/,"").replace(/^```(?:json)?\s*/i,"").replace(/\s*```$/i,"").trim();
+  const candidate=extractBalancedObject(cleaned);
+  if(!candidate)throw new XKiroRequestError("xKiro returned malformed JSON.","invalid_response",502);
+  try{return JSON.parse(candidate)}catch{
+    try{return JSON.parse(repairCommonJson(candidate))}catch{throw new XKiroRequestError("xKiro returned malformed JSON.","invalid_response",502)}
+  }
+}
 
 function contentText(content:unknown){if(typeof content==="string")return content;if(Array.isArray(content))return content.map((part)=>typeof part==="string"?part:part&&typeof part==="object"&&"text" in part&&typeof (part as {text?:unknown}).text==="string"?(part as {text:string}).text:"").join("");if(content&&typeof content==="object")return JSON.stringify(content);return ""}
 function statusError(status:number){if(status===401||status===403)return new XKiroRequestError("xKiro authentication failed. Check the server-side XKIRO_API_KEY.","unauthorized",status);if(status===429)return new XKiroRequestError("xKiro rate limit reached. StoryFrame will try its existing fallback analysis.","rate_limited",status);if(status>=500)return new XKiroRequestError("xKiro is temporarily unavailable. StoryFrame will try its existing fallback analysis.","server_error",status);return new XKiroRequestError(`xKiro request failed with status ${status}.`,"request_failed",status)}
 
 async function parseChatResponse(response:Response){const raw=await response.text();if(!response.ok){console.error("xKiro API error",{status:response.status,body:raw.replace(/\s+/g," ").slice(0,500)});throw statusError(response.status)}let envelope:unknown;try{envelope=JSON.parse(raw)}catch{console.error("xKiro returned non-JSON API envelope",raw.replace(/\s+/g," ").slice(0,500));throw new XKiroRequestError("xKiro returned an invalid API response.","invalid_response",502)}const content=(envelope as {choices?:Array<{message?:{content?:unknown}}>}|null)?.choices?.[0]?.message?.content;const text=contentText(content);if(!text)throw new XKiroRequestError("xKiro returned an empty analysis response.","empty_response",502);return {text,json:extractFirstJsonObject(text)}}
 
+function outputTokenLimit(model:StoryAnalysisModel,requested:number){
+  // xKiro currently advertises ~65K output for Medium 3.5 and 16K for Large 3.
+  const hardLimit=model==="mistralai/mistral-large-2512"?15000:32000;
+  return Math.max(256,Math.min(requested,hardLimit));
+}
+
+async function requestJsonCompletion(input:{model:StoryAnalysisModel;systemPrompt:string;userPrompt:string;maxTokens:number;temperature:number}){
+  const key=getApiKey();
+  const response=await fetchWithTimeout(`${getBaseUrl()}/chat/completions`,{method:"POST",headers:{Authorization:`Bearer ${key}`,"Content-Type":"application/json"},body:JSON.stringify({model:input.model,messages:[{role:"system",content:input.systemPrompt},{role:"user",content:input.userPrompt}],temperature:input.temperature,max_tokens:outputTokenLimit(input.model,input.maxTokens),response_format:{type:"json_object"}}),cache:"no-store"},getTimeout());
+  return parseChatResponse(response);
+}
+
 export async function xkiroJsonCompletion(input:{model:StoryAnalysisModel;systemPrompt:string;userPrompt:string;maxTokens?:number;temperature?:number}){
   const key=getApiKey();if(!key)throw new XKiroRequestError("XKIRO_API_KEY is not configured.","not_configured",503);if(!isStoryAnalysisModel(input.model))throw new XKiroRequestError("Unsupported xKiro story model.","invalid_model",400);
-  const response=await fetchWithTimeout(`${getBaseUrl()}/chat/completions`,{method:"POST",headers:{Authorization:`Bearer ${key}`,"Content-Type":"application/json"},body:JSON.stringify({model:input.model,messages:[{role:"system",content:input.systemPrompt},{role:"user",content:input.userPrompt}],temperature:input.temperature??0.15,max_tokens:input.maxTokens??14000,response_format:{type:"json_object"}}),cache:"no-store"},getTimeout());
-  return parseChatResponse(response);
+  const maxTokens=input.maxTokens??14000;const temperature=input.temperature??0.15;
+  try{return await requestJsonCompletion({model:input.model,systemPrompt:input.systemPrompt,userPrompt:input.userPrompt,maxTokens,temperature})}
+  catch(error){
+    if(!(error instanceof XKiroRequestError)||error.code!=="invalid_response")throw error;
+    console.warn("xKiro returned malformed structured output; retrying once with stricter JSON instructions.");
+    const retryPrompt=`${input.userPrompt}\n\nSTRICT JSON RETRY: Return exactly ONE complete valid JSON object and nothing else. Do not use markdown fences. Escape quotes and line breaks inside string values. Do not use trailing commas. Close every array and object. If space is limited, make descriptions shorter rather than truncating the JSON.`;
+    return requestJsonCompletion({model:input.model,systemPrompt:input.systemPrompt,userPrompt:retryPrompt,maxTokens,temperature:Math.min(temperature,0.03)});
+  }
 }
 
 export async function xkiroVisionJsonCompletion(input:{model:StoryAnalysisModel;systemPrompt:string;userPrompt:string;images:string[];maxTokens?:number;temperature?:number}){
@@ -37,7 +112,7 @@ export async function xkiroVisionJsonCompletion(input:{model:StoryAnalysisModel;
   const images=input.images.filter(Boolean).slice(0,3);
   if(!images.length)throw new XKiroRequestError("Panel QA requires at least one image.","invalid_response",400);
   const content=[...images.map((url)=>({type:"image_url" as const,image_url:{url}})),{type:"text" as const,text:input.userPrompt}];
-  const response=await fetchWithTimeout(`${getBaseUrl()}/chat/completions`,{method:"POST",headers:{Authorization:`Bearer ${key}`,"Content-Type":"application/json"},body:JSON.stringify({model:input.model,messages:[{role:"system",content:input.systemPrompt},{role:"user",content}],temperature:input.temperature??0,max_tokens:input.maxTokens??1800,response_format:{type:"json_object"}}),cache:"no-store"},getTimeout());
+  const response=await fetchWithTimeout(`${getBaseUrl()}/chat/completions`,{method:"POST",headers:{Authorization:`Bearer ${key}`,"Content-Type":"application/json"},body:JSON.stringify({model:input.model,messages:[{role:"system",content:input.systemPrompt},{role:"user",content}],temperature:input.temperature??0,max_tokens:outputTokenLimit(input.model,input.maxTokens??1800),response_format:{type:"json_object"}}),cache:"no-store"},getTimeout());
   return parseChatResponse(response);
 }
 
