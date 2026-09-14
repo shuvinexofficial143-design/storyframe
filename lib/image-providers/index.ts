@@ -10,8 +10,10 @@ const providers:Record<string,ImageProvider>={
   pollinations:pollinationsImageProvider
 };
 
-const MAX_EMBEDDED_IMAGE_BYTES=650_000;
-const MAX_EMBEDDED_EDGE=1280;
+// Keep JSON responses comfortably below Vercel's function payload limit even when
+// compatibility fields duplicate the same compact data URL.
+const MAX_EMBEDDED_IMAGE_BYTES=220_000;
+const MAX_EMBEDDED_EDGE=1024;
 
 export function getImageProvider(id="gemini"){
   return providers[id]||geminiImageProvider;
@@ -66,14 +68,14 @@ async function compactEmbeddedImage(value:string){
 
   const base=sharp(parsed.bytes).rotate().resize({width:MAX_EMBEDDED_EDGE,height:MAX_EMBEDDED_EDGE,fit:"inside",withoutEnlargement:true});
   let best:Uint8Array=parsed.bytes;
-  for(const quality of [82,74,66,58,50]){
+  for(const quality of [80,70,60,52,44]){
     const output=await base.clone().webp({quality,effort:4}).toBuffer();
     if(output.length<best.length)best=output;
     if(output.length<=MAX_EMBEDDED_IMAGE_BYTES)return `data:image/webp;base64,${output.toString("base64")}`;
   }
 
   const bestBuffer=Buffer.from(best);
-  const finalOutput=best.length<=MAX_EMBEDDED_IMAGE_BYTES?bestBuffer:await sharp(bestBuffer).resize({width:960,height:960,fit:"inside",withoutEnlargement:true}).webp({quality:48,effort:4}).toBuffer();
+  const finalOutput=best.length<=MAX_EMBEDDED_IMAGE_BYTES?bestBuffer:await sharp(bestBuffer).resize({width:800,height:800,fit:"inside",withoutEnlargement:true}).webp({quality:42,effort:4}).toBuffer();
   return `data:image/webp;base64,${finalOutput.toString("base64")}`;
 }
 
