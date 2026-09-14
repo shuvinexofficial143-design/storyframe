@@ -2,6 +2,7 @@ import {z} from "zod";
 import {xkiroJsonCompletion} from "../xkiro";
 import {isStoryAnalysisModel,type StoryAnalysisModel} from "../story-analysis-models";
 import {chooseMangaLayout,MANGA_NEGATIVE_PROMPT,MANGA_STYLE_PROMPTS} from "./presets";
+import {normalizeMangaStructuredData} from "./structured-normalize";
 import {
   MANGA_STYLE_PRESETS,
   type MangaChapterProduction,
@@ -95,10 +96,12 @@ function jsonRepairPrompt(base:string,raw:unknown,issues:string){return `${base}
 function issueSummary(error:z.ZodError){return error.issues.slice(0,14).map((issue)=>`${issue.path.map(String).join(".")||"root"}: ${issue.message}`).join("; ")}
 async function requestValidated<T>(model:StoryAnalysisModel,systemPrompt:string,userPrompt:string,schema:z.ZodType<T>,maxTokens=14000){
   let completion=await xkiroJsonCompletion({model,systemPrompt,userPrompt,temperature:0.12,maxTokens});
-  let parsed=schema.safeParse(completion.json);
+  let normalized=normalizeMangaStructuredData(completion.json);
+  let parsed=schema.safeParse(normalized);
   if(!parsed.success){
-    completion=await xkiroJsonCompletion({model,systemPrompt,userPrompt:jsonRepairPrompt(userPrompt,completion.json,issueSummary(parsed.error)),temperature:0.05,maxTokens});
-    parsed=schema.safeParse(completion.json);
+    completion=await xkiroJsonCompletion({model,systemPrompt,userPrompt:jsonRepairPrompt(userPrompt,normalized,issueSummary(parsed.error)),temperature:0.05,maxTokens});
+    normalized=normalizeMangaStructuredData(completion.json);
+    parsed=schema.safeParse(normalized);
   }
   if(!parsed.success)throw new Error(`Manga planner returned incomplete structured data: ${issueSummary(parsed.error)}`);
   return parsed.data;
