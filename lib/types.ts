@@ -1,3 +1,5 @@
+export type StoryAnalysisModel="mistralai/mistral-medium-3.5"|"mistralai/mistral-large-2512";
+
 export type Character={
   id:string;
   name:string;
@@ -53,6 +55,7 @@ export type ProjectState={
   aspectRatio:string;
   story:string;
   summary:string;
+  analysisModel:StoryAnalysisModel;
   analysisProvider?:string;
   imageProvider?:string;
   characters:Character[];
