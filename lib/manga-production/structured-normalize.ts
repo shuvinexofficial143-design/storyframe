@@ -26,14 +26,53 @@ const TEXT_FIELDS=new Set([
   "continuityFromPreviousPanel","continuityToNextPanel","imagePrompt","negativePrompt","continuityToNextPage","timeline","previousPageEndState","chunkEndState"
 ]);
 
-function normalizeLayout(value:unknown):unknown{
-  if(!value||typeof value!=="object"||Array.isArray(value))return value;
+const STRING_ARRAY_FIELDS=new Set([
+  "accessories","importantObjects","importantProps","characterNames","propNames","heldObjects","injuries","soundEffects","activeProps"
+]);
+
+const BOOLEAN_FIELDS=new Set(["dirtyClothes","wetClothes"]);
+
+function normalizeStringArray(value:unknown):string[]{
+  if(value==null)return [];
+  if(Array.isArray(value))return value.map((item)=>structuredText(item,"")).filter((item):item is string=>Boolean(item));
+  const text=structuredText(value,"");
+  return text?[text]:[];
+}
+
+function normalizeBoolean(value:unknown):boolean{
+  if(typeof value==="boolean")return value;
+  if(typeof value==="number")return value!==0;
+  if(typeof value==="string")return ["true","yes","1","y","wet","dirty"].includes(value.trim().toLowerCase());
+  return false;
+}
+
+function normalizeLayout(value:unknown):Record<string,string>{
+  if(value==null)return {};
+  if(Array.isArray(value)){
+    const text=structuredText(value,"");
+    return text?{details:text}:{};
+  }
+  if(typeof value!=="object"){
+    const text=structuredText(value,"");
+    return text?{details:text}:{};
+  }
   const output:Record<string,string>={};
   for(const [key,item] of Object.entries(value as Record<string,unknown>)){
     const text=structuredText(item,"");
     if(text)output[key]=text;
   }
   return output;
+}
+
+function normalizeCharacterList(value:unknown):unknown{
+  // Top-level master `characters` is an array of character objects, while
+  // panel/page `characters` can be a list of names or an end-state record.
+  if(Array.isArray(value)){
+    if(value.every((item)=>item==null||typeof item!=="object"))return normalizeStringArray(value);
+    return value;
+  }
+  if(typeof value==="string")return normalizeStringArray(value);
+  return value;
 }
 
 export function normalizeMangaStructuredData<T>(value:T):T{
@@ -53,7 +92,21 @@ export function normalizeMangaStructuredData<T>(value:T):T{
         output[key]=structuredText(item,"");
         continue;
       }
-      if(TEXT_FIELDS.has(key)&&(typeof item==="object"||Array.isArray(item))){
+      if(key==="characters"){
+        output[key]=visit(normalizeCharacterList(item));
+        continue;
+      }
+      if(STRING_ARRAY_FIELDS.has(key)){
+        output[key]=normalizeStringArray(item);
+        continue;
+      }
+      if(BOOLEAN_FIELDS.has(key)){
+        output[key]=normalizeBoolean(item);
+        continue;
+      }
+      // Always normalize known text fields, not only object/array values. This
+      // safely absorbs null, numeric and boolean variants emitted by LLMs.
+      if(TEXT_FIELDS.has(key)){
         output[key]=structuredText(item,"");
         continue;
       }
