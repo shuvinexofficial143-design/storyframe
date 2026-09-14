@@ -1,6 +1,7 @@
 import {NextResponse} from "next/server";
 import {z} from "zod";
 import {analyzeMangaMaster,planMangaPages} from "@/lib/manga-production/planner";
+import {analyzeLongMangaMaster,shouldUseLongStoryAnalysis} from "@/lib/manga-production/long-story";
 import {MANGA_STYLE_PRESETS} from "@/lib/manga-production/types";
 import {STORY_ANALYSIS_MODELS,isStoryAnalysisModel,type StoryAnalysisModel} from "@/lib/story-analysis-models";
 import {XKiroRequestError} from "@/lib/xkiro";
@@ -57,7 +58,10 @@ export async function POST(request:Request){
     const analysisModel=liveSelectedModel(request,parsed.data.analysisModel);
 
     if(parsed.data.action==="master"){
-      const data=await analyzeMangaMaster({...parsed.data,analysisModel});
+      const masterInput={...parsed.data,analysisModel};
+      const data=shouldUseLongStoryAnalysis(parsed.data.story)
+        ?await analyzeLongMangaMaster(masterInput)
+        :await analyzeMangaMaster(masterInput);
       return NextResponse.json({kind:"master",data});
     }
 
