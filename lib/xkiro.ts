@@ -38,7 +38,6 @@ function extractBalancedObject(value:string):string|undefined{
 }
 
 function repairCommonJson(value:string):string{
-  // LLMs occasionally emit literal line breaks/tabs inside quoted strings.
   let escapedText="",inString=false,escaped=false;
   for(const char of value){
     if(inString){
@@ -54,7 +53,6 @@ function repairCommonJson(value:string):string{
     escapedText+=char;
   }
 
-  // Remove trailing commas before } or ] without touching quoted strings.
   let output="";inString=false;escaped=false;
   for(let index=0;index<escapedText.length;index+=1){
     const char=escapedText[index];
@@ -84,14 +82,14 @@ function statusError(status:number){if(status===401||status===403)return new XKi
 async function parseChatResponse(response:Response){const raw=await response.text();if(!response.ok){console.error("xKiro API error",{status:response.status,body:raw.replace(/\s+/g," ").slice(0,500)});throw statusError(response.status)}let envelope:unknown;try{envelope=JSON.parse(raw)}catch{console.error("xKiro returned non-JSON API envelope",raw.replace(/\s+/g," ").slice(0,500));throw new XKiroRequestError("xKiro returned an invalid API response.","invalid_response",502)}const content=(envelope as {choices?:Array<{message?:{content?:unknown}}>}|null)?.choices?.[0]?.message?.content;const text=contentText(content);if(!text)throw new XKiroRequestError("xKiro returned an empty analysis response.","empty_response",502);return {text,json:extractFirstJsonObject(text)}}
 
 function outputTokenLimit(model:StoryAnalysisModel,requested:number){
-  // xKiro currently advertises ~65K output for Medium 3.5 and 16K for Large 3.
   const hardLimit=model==="mistralai/mistral-large-2512"?15000:32000;
   return Math.max(256,Math.min(requested,hardLimit));
 }
 
 async function requestJsonCompletion(input:{model:StoryAnalysisModel;systemPrompt:string;userPrompt:string;maxTokens:number;temperature:number}){
   const key=getApiKey();
-  const response=await fetchWithTimeout(`${getBaseUrl()}/chat/completions`,{method:"POST",headers:{Authorization:`Bearer ${key}`,"Content-Type":"application/json"},body:JSON.stringify({model:input.model,messages:[{role:"system",content:input.systemPrompt},{role:"user",content:input.userPrompt}],temperature:input.temperature,max_tokens:outputTokenLimit(input.model,input.maxTokens),response_format:{type:"json_object"}}),cache:"no-store"},getTimeout());
+  const textBudget=input.model==="mistralai/mistral-medium-3.5"?Math.max(input.maxTokens,24000):input.maxTokens;
+  const response=await fetchWithTimeout(`${getBaseUrl()}/chat/completions`,{method:"POST",headers:{Authorization:`Bearer ${key}`,"Content-Type":"application/json"},body:JSON.stringify({model:input.model,messages:[{role:"system",content:input.systemPrompt},{role:"user",content:input.userPrompt}],temperature:input.temperature,max_tokens:outputTokenLimit(input.model,textBudget),response_format:{type:"json_object"}}),cache:"no-store"},getTimeout());
   return parseChatResponse(response);
 }
 
