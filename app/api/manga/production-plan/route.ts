@@ -2,7 +2,7 @@ import {NextResponse} from "next/server";
 import {z} from "zod";
 import {analyzeMangaMaster,planMangaPages} from "@/lib/manga-production/planner";
 import {MANGA_STYLE_PRESETS} from "@/lib/manga-production/types";
-import {STORY_ANALYSIS_MODELS} from "@/lib/story-analysis-models";
+import {STORY_ANALYSIS_MODELS,isStoryAnalysisModel,type StoryAnalysisModel} from "@/lib/story-analysis-models";
 import {XKiroRequestError} from "@/lib/xkiro";
 
 const Base=z.object({
@@ -34,19 +34,35 @@ const Pages=Base.extend({
 });
 
 const Input=z.discriminatedUnion("action",[Master,Pages]);
+const MODEL_COOKIE="storyframe-analysis-model";
+
+function liveSelectedModel(request:Request,fallback:StoryAnalysisModel){
+  const raw=request.headers.get("cookie")||"";
+  const pair=raw.split(";").map((item)=>item.trim()).find((item)=>item.startsWith(`${MODEL_COOKIE}=`));
+  if(!pair)return fallback;
+  try{
+    const value=decodeURIComponent(pair.slice(MODEL_COOKIE.length+1));
+    return isStoryAnalysisModel(value)?value:fallback;
+  }catch{
+    return fallback;
+  }
+}
 
 export async function POST(request:Request){
   try{
     const parsed=Input.safeParse(await request.json());
     if(!parsed.success)return NextResponse.json({error:"Invalid manga production request",details:parsed.error.flatten()},{status:400});
+    // The body model remains allow-listed, while the selector cookie fixes the case
+    // where the top-level model selector changes after Manga Studio already hydrated.
+    const analysisModel=liveSelectedModel(request,parsed.data.analysisModel);
 
     if(parsed.data.action==="master"){
-      const data=await analyzeMangaMaster(parsed.data);
+      const data=await analyzeMangaMaster({...parsed.data,analysisModel});
       return NextResponse.json({kind:"master",data});
     }
 
     const data=await planMangaPages({
-      analysisModel:parsed.data.analysisModel,
+      analysisModel,
       stylePreset:parsed.data.stylePreset,
       storySummary:parsed.data.storySummary,
       beats:parsed.data.beats as never,
