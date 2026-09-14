@@ -12,7 +12,13 @@ function loadImage(src:string){return new Promise<HTMLImageElement>((resolve,rej
 
 function drawCover(ctx:CanvasRenderingContext2D,image:HTMLImageElement,x:number,y:number,w:number,h:number){
   const scale=Math.max(w/image.width,h/image.height);const sw=w/scale;const sh=h/scale;const sx=(image.width-sw)/2;const sy=(image.height-sh)/2;
+  ctx.save();
+  // The generation prompt already requests black-and-white manga. This final
+  // composition guard prevents an occasional provider color drift from leaking
+  // into the exported manga page.
+  ctx.filter="grayscale(1) contrast(1.06)";
   ctx.drawImage(image,sx,sy,sw,sh,x,y,w,h);
+  ctx.restore();
 }
 
 function wrap(ctx:CanvasRenderingContext2D,text:string,maxWidth:number){
@@ -30,7 +36,11 @@ function drawDialogue(ctx:CanvasRenderingContext2D,dialogue:MangaDialogue,index:
     ctx.beginPath();ctx.rect(bx,by,bubbleW,bubbleH);ctx.fill();ctx.stroke();
   }else{
     ctx.beginPath();ctx.ellipse(bx+bubbleW/2,by+bubbleH/2,bubbleW/2,bubbleH/2,0,0,Math.PI*2);ctx.fill();ctx.stroke();
-    if(dialogue.bubbleType!=="thought"){
+    if(dialogue.bubbleType==="thought"){
+      const side=index%2===0?-1:1;
+      ctx.beginPath();ctx.arc(bx+bubbleW/2+side*bubbleW*.28,by+bubbleH*.86,12,0,Math.PI*2);ctx.fill();ctx.stroke();
+      ctx.beginPath();ctx.arc(bx+bubbleW/2+side*bubbleW*.36,by+bubbleH+18,7,0,Math.PI*2);ctx.fill();ctx.stroke();
+    }else{
       ctx.beginPath();const tailX=index%2===0?bx+bubbleW*.2:bx+bubbleW*.8;ctx.moveTo(tailX,by+bubbleH*.78);ctx.lineTo(tailX+(index%2===0?-22:22),by+bubbleH+34);ctx.lineTo(tailX+28,by+bubbleH*.82);ctx.closePath();ctx.fill();ctx.stroke();
     }
   }
