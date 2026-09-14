@@ -23,9 +23,11 @@ export async function POST(request:Request){
     if(body.analysisModel!==undefined&&!isStoryAnalysisModel(body.analysisModel)){
       return NextResponse.json({error:"Invalid AI story model selection."},{status:400});
     }
-    if(body.analysisModel===undefined){
-      body.analysisModel=selectedModelFromCookie(request)||DEFAULT_STORY_ANALYSIS_MODEL;
-    }
+    // The top-level selector persists its current choice in this cookie. Prefer
+    // that allow-listed value so a model switch takes effect without reloading a
+    // separately hydrated workspace component.
+    body.analysisModel=selectedModelFromCookie(request)
+      ||(isStoryAnalysisModel(body.analysisModel)?body.analysisModel:DEFAULT_STORY_ANALYSIS_MODEL);
 
     const xkiro=await tryXKiroContinuityAnalysis(body);
     if(xkiro.ok)return NextResponse.json(xkiro.data);
