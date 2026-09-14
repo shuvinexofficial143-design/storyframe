@@ -1,5 +1,6 @@
 import {AnalyzeInput,ContinuityRawOutput,buildContinuityAnalysisPrompt,normalizeContinuityOutput} from "./analyzer";
 import {XKiroRequestError,xkiroJsonCompletion} from "../xkiro";
+import {VISUAL_CATEGORIES,type VisualCategory} from "./storyboard-prompt";
 
 const SYSTEM_PROMPT=`You are StoryFrame AI, an expert visual story director, storyboard artist, continuity director, and image-prompt writer.
 
@@ -34,7 +35,152 @@ Location descriptions must preserve recurring building/room layout, doors/window
 
 Existing StoryFrame Visual Bible, locked characters, locations, props, and vehicles in the user prompt are authoritative. Never silently redesign them. Story-authorized temporary states such as injury, wet clothes, battle damage, or a costume change must be represented as temporary scene state rather than rewriting the base identity.
 
-The user prompt defines the exact JSON shape required by the existing StoryFrame continuity pipeline. Follow it exactly.`;
+Prefer the exact JSON shape requested in the user prompt. StoryFrame will safely normalize harmless camelCase/snake_case field differences, but all factual content and scene chronology must remain correct.`;
+
+type JsonRecord=Record<string,unknown>;
+
+function record(value:unknown):JsonRecord{return value&&typeof value==="object"&&!Array.isArray(value)?value as JsonRecord:{}}
+function text(value:unknown,fallback=""){return typeof value==="string"&&value.trim()?value.trim():fallback}
+function list(value:unknown){return Array.isArray(value)?value.map((item)=>text(item)).filter(Boolean):typeof value==="string"&&value.trim()?[value.trim()]:[]}
+function numberValue(value:unknown,fallback:number){const n=typeof value==="number"?value:Number(value);return Number.isFinite(n)?n:fallback}
+function first(obj:JsonRecord,...keys:string[]){for(const key of keys){if(obj[key]!==undefined&&obj[key]!==null)return obj[key]}return undefined}
+
+function visualCategory(value:unknown,index:number,scene:JsonRecord):VisualCategory{
+  const raw=text(value).toUpperCase().replace(/_/g," ").replace(/\s+/g," ");
+  const exact=(VISUAL_CATEGORIES as readonly string[]).find((item)=>item===raw);
+  if(exact)return exact as VisualCategory;
+  const source=`${raw} ${text(first(scene,"camera_shot","cameraShot"))} ${text(first(scene,"description","action"))}`.toLowerCase();
+  if(source.includes("close"))return "CLOSE-UP";
+  if(source.includes("crowd")||source.includes("group"))return "CROWD";
+  if(source.includes("dialog"))return "DIALOGUE";
+  if(source.includes("reaction")||source.includes("react"))return "REACTION";
+  if(source.includes("reveal")||source.includes("discover"))return "REVEAL";
+  if(source.includes("magic")||source.includes("cultivation")||source.includes("energy")||source.includes("spiritual"))return "MAGIC / CULTIVATION";
+  if(source.includes("move")||source.includes("walk")||source.includes("run")||source.includes("travel"))return "MOVEMENT";
+  if(source.includes("transition"))return "TRANSITION";
+  if(source.includes("emotion")||source.includes("sad")||source.includes("fear")||source.includes("joy"))return "EMOTIONAL BEAT";
+  if(source.includes("environment")||source.includes("landscape"))return "ENVIRONMENT";
+  if(source.includes("introduc"))return "CHARACTER INTRODUCTION";
+  if(source.includes("action")||source.includes("fight")||source.includes("attack")||source.includes("battle"))return "ACTION";
+  return index===0?"ESTABLISHING":"ACTION";
+}
+
+function adaptCharacter(value:unknown){
+  const item=record(value);
+  const name=text(first(item,"name","characterName"),"Unnamed Character");
+  const appearance=text(first(item,"visualDescription","appearance","description"),`Stable reusable visual identity for ${name}`);
+  const outfit=text(first(item,"outfit","costume","clothing"),"Preserve the same established outfit until the story explicitly changes it");
+  const consistency=text(first(item,"consistencyNotes","consistency_notes"),"Keep the same facial structure, hairstyle, approximate age, body build and outfit across scenes until the story explicitly changes them.");
+  return {
+    name,
+    role:text(first(item,"role"),"recurring character"),
+    visualDescription:appearance,
+    outfit,
+    eyeColor:text(first(item,"eyeColor","eye_color"),"preserve established eye color"),
+    hairColor:text(first(item,"hairColor","hair_color"),"preserve established hair color"),
+    keyFeatures:list(first(item,"keyFeatures","key_features")).length?list(first(item,"keyFeatures","key_features")):[consistency],
+    referencePrompt:text(first(item,"referencePrompt","canonicalPrompt","canonical_prompt"),`${name}, ${appearance}, ${outfit}. ${consistency}`),
+    identityLock:first(item,"identityLock","identity_lock"),
+    costumeLock:first(item,"costumeLock","costume_lock"),
+    personalityVisuals:text(first(item,"personalityVisuals","personality_visuals"),"")||undefined
+  };
+}
+
+function adaptLocation(value:unknown){
+  const item=record(value);
+  const name=text(first(item,"name","locationName"),"Primary Story Location");
+  const architecture=text(first(item,"architectureStyle","architecture"),`Preserve the established architecture and layout of ${name}`);
+  const lighting=text(first(item,"lighting"),"Cinematic motivated lighting consistent with the story");
+  const continuity=text(first(item,"continuity","continuityNotes","geometryIdentity"),"Preserve doors, windows, furniture, landmarks, major props and layout across recurring scenes.");
+  return {
+    name,
+    architectureStyle:architecture,
+    lighting,
+    colorPalette:text(first(item,"colorPalette","color_palette"),"follow the persistent project Visual Bible palette"),
+    referencePrompt:text(first(item,"referencePrompt","canonicalPrompt","canonical_prompt"),`${name}, ${architecture}, ${lighting}. ${continuity}`),
+    geometryIdentity:continuity,
+    materials:text(first(item,"materials"),"preserve established story-appropriate materials"),
+    importantFeatures:list(first(item,"importantFeatures","important_features"))
+  };
+}
+
+function adaptObject(value:unknown,kind:"prop"|"vehicle"){
+  const item=record(value);
+  const name=text(first(item,"name"),kind==="vehicle"?"Recurring Vehicle":"Recurring Prop");
+  return {
+    name,
+    ...(kind==="prop"?{kind:text(first(item,"kind"),"prop")==="artifact"?"artifact":"prop" as const}:{}),
+    owner:text(first(item,"owner"),"")||undefined,
+    shape:text(first(item,"shape"),"preserve established recurring shape"),
+    size:text(first(item,"size"),"story-appropriate scale"),
+    materials:text(first(item,"materials"),"story-appropriate materials"),
+    colors:list(first(item,"colors","colorPalette","color_palette")),
+    ornamentation:text(first(item,"ornamentation"),"preserve established ornamentation"),
+    magicalEffects:text(first(item,"magicalEffects","magical_effects"),"none unless established by the story"),
+    canonicalPrompt:text(first(item,"canonicalPrompt","canonical_prompt","referencePrompt"),`${name}, preserve the established recurring design without redesign`)
+  };
+}
+
+function adaptScene(value:unknown,index:number){
+  const item=record(value);
+  const source=text(first(item,"narration_text","sourceText","storyText","source_text"),text(first(item,"description","action"),`Scene ${index+1}`));
+  const description=text(first(item,"description","action"),source);
+  const characterNames=list(first(item,"character_names","characterNames","characters"));
+  const locationNames=list(first(item,"location_names","locationNames","locationName","location"));
+  const cameraShot=text(first(item,"camera_shot","cameraShot","shotType"),index===0?"wide establishing shot":"medium cinematic shot");
+  const cameraAngle=text(first(item,"camera_angle","cameraAngle"),"eye-level");
+  const continuity=text(first(item,"continuity_notes","continuityNotes"),"Preserve established character identity, costume, location layout, props and story state from previous scenes.");
+  const imagePrompt=text(first(item,"image_prompt","imagePrompt","prompt"),`${cameraShot}, ${cameraAngle}. ${description}. Cinematic storytelling, detailed environment, coherent lighting, consistent characters and location, no text, no watermark.`);
+  const stateDetailsRaw=first(item,"character_state_details","characterStateDetails");
+  const stateDetails=Array.isArray(stateDetailsRaw)?stateDetailsRaw.map((state)=>{const s=record(state);return {character_name:text(first(s,"character_name","characterName"),"Character"),state_id:text(first(s,"state_id","stateId"),"normal"),state_name:text(first(s,"state_name","stateName"),"Normal"),description:text(first(s,"description"),"base established appearance"),outfit_override:text(first(s,"outfit_override","outfitOverride"),"")||undefined,visual_effects:list(first(s,"visual_effects","visualEffects"))}}):[];
+  const statesRaw=record(first(item,"character_states","characterStates"));
+  const characterStates=Object.fromEntries(Object.entries(statesRaw).map(([key,val])=>[key,text(val,"normal")]));
+  return {
+    scene_number:Math.max(1,Math.round(numberValue(first(item,"scene_number","sceneNumber"),index+1))),
+    scene_title:text(first(item,"scene_title","sceneTitle","title"),`Scene ${index+1}`),
+    visual_category:visualCategory(first(item,"visual_category","visualCategory","type"),index,item),
+    narration_text:source,
+    description,
+    character_names:characterNames,
+    location_names:locationNames,
+    prop_names:list(first(item,"prop_names","propNames","props")),
+    vehicle_names:list(first(item,"vehicle_names","vehicleNames","vehicles")),
+    camera_shot:cameraShot,
+    camera_angle:cameraAngle,
+    lens_feel:text(first(item,"lens_feel","lensFeel"),"cinematic natural perspective"),
+    composition:text(first(item,"composition"),"clear focal hierarchy with cinematic depth"),
+    camera_movement_suggestion:text(first(item,"camera_movement_suggestion","cameraMovementSuggestion"),"subtle cinematic movement"),
+    action:text(first(item,"action"),description),
+    emotion:text(first(item,"emotion","mood"),"story-appropriate emotion"),
+    lighting_style:text(first(item,"lighting_style","lightingStyle","lighting"),"cinematic motivated lighting"),
+    time_of_day:text(first(item,"time_of_day","timeOfDay"),"consistent with story"),
+    weather:text(first(item,"weather"),"preserve unless story changes it"),
+    story_state:text(first(item,"story_state","storyState"),description),
+    character_states:characterStates,
+    character_state_details:stateDetails,
+    continuity_notes:continuity,
+    image_prompt:imagePrompt
+  };
+}
+
+function adaptXKiroPayload(value:unknown){
+  const root=record(value);
+  const payload=record(first(root,"analysis","result","data")||root);
+  const charactersRaw=first(payload,"characters","characterProfiles","character_profiles");
+  const locationsRaw=first(payload,"locations","locationProfiles","location_profiles");
+  const propsRaw=first(payload,"props","artifacts");
+  const vehiclesRaw=first(payload,"vehicles");
+  const scenesRaw=first(payload,"scenes","storyboard","sceneBreakdown","scene_breakdown");
+  return {
+    summary:text(first(payload,"summary","storySummary","story_summary"),"Story analyzed into cinematic visual beats."),
+    projectVisualBible:first(payload,"projectVisualBible","project_visual_bible")??null,
+    characters:Array.isArray(charactersRaw)?charactersRaw.map(adaptCharacter):[],
+    locations:Array.isArray(locationsRaw)?locationsRaw.map(adaptLocation):[],
+    props:Array.isArray(propsRaw)?propsRaw.map((item)=>adaptObject(item,"prop")):[],
+    vehicles:Array.isArray(vehiclesRaw)?vehiclesRaw.map((item)=>adaptObject(item,"vehicle")):[],
+    scenes:Array.isArray(scenesRaw)?scenesRaw.slice(0,60).map(adaptScene):[]
+  };
+}
 
 export async function tryXKiroContinuityAnalysis(rawInput:unknown){
   const parsed=AnalyzeInput.safeParse(rawInput);
@@ -52,10 +198,11 @@ export async function tryXKiroContinuityAnalysis(rawInput:unknown){
       maxTokens:14000
     });
 
-    const validated=ContinuityRawOutput.safeParse(completion.json);
+    const adapted=adaptXKiroPayload(completion.json);
+    const validated=ContinuityRawOutput.safeParse(adapted);
     if(!validated.success){
-      console.error("xKiro continuity validation failed",validated.error.flatten());
-      return {ok:false as const,status:502,error:"xKiro returned story data that did not pass StoryFrame validation."};
+      console.error("xKiro continuity validation failed after normalization",validated.error.flatten());
+      return {ok:false as const,status:502,error:"xKiro returned incomplete story data. StoryFrame tried safe normalization, then switched to fallback analysis."};
     }
 
     return {
