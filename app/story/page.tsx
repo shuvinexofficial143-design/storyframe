@@ -4,6 +4,7 @@ import {FileText,Loader2,Sparkles} from "lucide-react";
 import {useProject} from "@/components/project-provider";
 import {sampleStory} from "@/lib/default-project";
 import {parseJsonResponse} from "@/lib/fetch-json";
+import {STORY_ANALYSIS_MODEL_OPTIONS} from "@/lib/story-analysis-models";
 import type {Character,Location,Scene,StoryAnalysisModel} from "@/lib/types";
 import {Button,Card,PageHeading} from "@/components/ui";
 
@@ -16,7 +17,7 @@ export default function Story(){
   const words=useMemo(()=>project.story.trim()?project.story.trim().split(/\s+/).length:0,[project.story]);
 
   const analyze=async()=>{
-    if(!project.story.trim()) return;
+    if(!project.story.trim())return;
     setLoading(true);
     setError("");
     try{
@@ -29,6 +30,8 @@ export default function Story(){
       setLoading(false);
     }
   };
+
+  const selectedModel=STORY_ANALYSIS_MODEL_OPTIONS.find((option)=>option.value===project.analysisModel)||STORY_ANALYSIS_MODEL_OPTIONS[0];
 
   return <>
     <PageHeading eyebrow="Step 1" title="Paste your story" description="Choose a Mistral model, then analyze the story into characters, locations, scenes and reusable image prompts. xKiro is used first; the existing fallback stays available if the xKiro request fails." action={<Button onClick={analyze} disabled={loading||!project.story.trim()}>{loading?<Loader2 className="animate-spin" size={16}/>:<Sparkles size={16}/>} Analyze story</Button>}/>
@@ -48,12 +51,11 @@ export default function Story(){
           <Button variant="secondary" className="mt-5 w-full" onClick={()=>updateProject({story:sampleStory})}>Load demo story</Button>
         </Card>
         <Card className="p-5">
-          <div className="text-sm font-bold">AI story model</div>
+          <div className="text-sm font-bold">AI Story Model</div>
           <select value={project.analysisModel} onChange={(event)=>updateProject({analysisModel:event.target.value as StoryAnalysisModel})} className="mt-3 w-full rounded-xl border border-white/10 bg-[#0d0f14] px-3 py-2.5 text-sm">
-            <option value="mistralai/mistral-medium-3.5">Mistral Medium 3.5</option>
-            <option value="mistralai/mistral-large-2512">Mistral Large 3</option>
+            {STORY_ANALYSIS_MODEL_OPTIONS.map((option)=><option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
-          <p className="mt-3 text-xs leading-5 text-zinc-500">Medium 3.5 is the default. Choose Large 3 when you want deeper analysis and richer scene prompts.</p>
+          <p className="mt-3 text-xs leading-5 text-zinc-500">{selectedModel.description}</p>
         </Card>
         <Card className="p-5">
           <div className="text-sm font-bold">Visual preset</div>
