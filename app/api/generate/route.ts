@@ -30,7 +30,7 @@ export async function POST(req:Request){
 
     return NextResponse.json({
       image:result.imageDataUrl,
-      sourceUrl:result.sourceUrl,
+      sourceUrl:result.sourceUrl||result.imageDataUrl,
       provider:result.provider,
       seed:result.seed,
       prompt:finalPrompt,
