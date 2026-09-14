@@ -1,6 +1,6 @@
 "use client";
 
-import {useEffect,useState} from "react";
+import {useState} from "react";
 import {BookOpen,Clapperboard} from "lucide-react";
 import {CinematicContinuityStudio} from "./cinematic-continuity-studio";
 import {MangaProductionStudio} from "./manga-production-studio";
@@ -8,9 +8,13 @@ import {MangaProductionStudio} from "./manga-production-studio";
 const STORAGE_KEY="storyframe-workspace-mode";
 type Mode="manga"|"cinematic";
 
+function initialMode():Mode{
+  if(typeof window==="undefined")return "manga";
+  try{const saved=window.localStorage.getItem(STORAGE_KEY);return saved==="cinematic"?"cinematic":"manga"}catch{return "manga"}
+}
+
 export function StoryFrameWorkspace(){
-  const [mode,setMode]=useState<Mode>("manga");
-  useEffect(()=>{try{const saved=localStorage.getItem(STORAGE_KEY);if(saved==="manga"||saved==="cinematic")setMode(saved)}catch{}},[]);
+  const [mode,setMode]=useState<Mode>(initialMode);
   const change=(next:Mode)=>{setMode(next);try{localStorage.setItem(STORAGE_KEY,next)}catch{}};
   return <>
     <div className="border-b border-white/10 bg-[#0b0d13] px-4 py-3 text-zinc-100">
