@@ -15,7 +15,7 @@ export function compileMangaPanelPrompt(input:{project:MangaProject;production:M
 
   for(const name of panel.characters){
     const character=project.characters.find((item)=>normalizeName(item.name)===normalizeName(name));
-    const state=production.continuityState.characters[name]||production.initialCharacterStates[name];
+    const state=panel.characterStates[name]||production.initialCharacterStates[name]||production.continuityState.characters[name];
     if(character){
       const identity=character.identityLock;
       const costume=state?.currentOutfit||character.costumeLock.primaryOutfit||character.outfit;
@@ -25,7 +25,7 @@ export function compileMangaPanelPrompt(input:{project:MangaProject;production:M
         `Hair: ${identity.hairColor}, ${identity.hairLength}, ${identity.hairstyle}.`,
         `Body: ${identity.bodyBuild}, ${identity.heightClass}; apparent age ${identity.apparentAge}.`,
         `Outfit: ${costume}. Accessories: ${character.costumeLock.accessories}. Weapons: ${character.costumeLock.weapons.join(", ")||"none"}.`,
-        state?`CURRENT STATE: location ${state.currentLocation}; position ${state.position}; direction ${state.bodyDirection}; pose ${state.pose}; expression ${state.expression}; held objects ${state.heldObjects.join(", ")||"none"}; injuries ${state.injuries.join(", ")||"none"}; dirty clothes ${state.dirtyClothes}; wet clothes ${state.wetClothes}.`:"",
+        state?`CURRENT PANEL STATE: location ${state.currentLocation}; position ${state.position}; direction ${state.bodyDirection}; pose ${state.pose}; expression ${state.expression}; held objects ${state.heldObjects.join(", ")||"none"}; injuries ${state.injuries.join(", ")||"none"}; dirty clothes ${state.dirtyClothes}; wet clothes ${state.wetClothes}.`:"",
         `Consistency: ${character.negativeChanges.join("; ")}.`
       ].filter(Boolean).join(" "));
       const primary=character.manualReferenceImage||character.referenceImages[0]?.url;
