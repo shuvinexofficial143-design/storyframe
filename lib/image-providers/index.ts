@@ -65,14 +65,15 @@ async function compactEmbeddedImage(value:string){
   if(parsed.bytes.length<=MAX_EMBEDDED_IMAGE_BYTES)return value;
 
   const base=sharp(parsed.bytes).rotate().resize({width:MAX_EMBEDDED_EDGE,height:MAX_EMBEDDED_EDGE,fit:"inside",withoutEnlargement:true});
-  let best=parsed.bytes;
+  let best:Uint8Array=parsed.bytes;
   for(const quality of [82,74,66,58,50]){
     const output=await base.clone().webp({quality,effort:4}).toBuffer();
     if(output.length<best.length)best=output;
     if(output.length<=MAX_EMBEDDED_IMAGE_BYTES)return `data:image/webp;base64,${output.toString("base64")}`;
   }
 
-  const finalOutput=best.length<=MAX_EMBEDDED_IMAGE_BYTES?best:await sharp(best).resize({width:960,height:960,fit:"inside",withoutEnlargement:true}).webp({quality:48,effort:4}).toBuffer();
+  const bestBuffer=Buffer.from(best);
+  const finalOutput=best.length<=MAX_EMBEDDED_IMAGE_BYTES?bestBuffer:await sharp(bestBuffer).resize({width:960,height:960,fit:"inside",withoutEnlargement:true}).webp({quality:48,effort:4}).toBuffer();
   return `data:image/webp;base64,${finalOutput.toString("base64")}`;
 }
 
