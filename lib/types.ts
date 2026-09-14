@@ -1,4 +1,5 @@
-export type StoryAnalysisModel="mistralai/mistral-medium-3.5"|"mistralai/mistral-large-2512";
+import type {StoryAnalysisModel} from "./story-analysis-models";
+export type {StoryAnalysisModel} from "./story-analysis-models";
 
 export type Character={
   id:string;
