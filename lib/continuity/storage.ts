@@ -1,6 +1,42 @@
+import {isStoryAnalysisModel} from "../story-analysis-models";
 import type {MangaStudioState} from "./project-types";
 import {migrateProject} from "./project-defaults";
-const DB_NAME="storyframe-manga-continuity";const STORE="studio";const STATE_KEY="state-v1";
+
+const DB_NAME="storyframe-manga-continuity";
+const STORE="studio";
+const STATE_KEY="state-v1";
+const ANALYSIS_MODEL_KEY="storyframe-analysis-model";
+
 function openDb():Promise<IDBDatabase>{return new Promise((resolve,reject)=>{const request=indexedDB.open(DB_NAME,1);request.onupgradeneeded=()=>{const db=request.result;if(!db.objectStoreNames.contains(STORE))db.createObjectStore(STORE)};request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error)})}
-export async function loadStudioState():Promise<MangaStudioState|null>{if(typeof indexedDB==="undefined")return null;const db=await openDb();const state=await new Promise<MangaStudioState|null>((resolve,reject)=>{const tx=db.transaction(STORE,"readonly");const req=tx.objectStore(STORE).get(STATE_KEY);req.onsuccess=()=>resolve((req.result as MangaStudioState|undefined)||null);req.onerror=()=>reject(req.error)});if(!state?.projects?.length)return state;const projects=state.projects.map((project)=>migrateProject(project));return {activeProjectId:projects.some((p)=>p.id===state.activeProjectId)?state.activeProjectId:projects[0].id,projects}}
-export async function saveStudioState(state:MangaStudioState):Promise<void>{if(typeof indexedDB==="undefined")return;const db=await openDb();await new Promise<void>((resolve,reject)=>{const tx=db.transaction(STORE,"readwrite");tx.objectStore(STORE).put(state,STATE_KEY);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error)})}
+
+function browserAnalysisModel(){
+  if(typeof localStorage==="undefined")return undefined;
+  try{
+    const value=localStorage.getItem(ANALYSIS_MODEL_KEY);
+    return isStoryAnalysisModel(value)?value:undefined;
+  }catch{
+    return undefined;
+  }
+}
+
+function applyBrowserModel(state:MangaStudioState):MangaStudioState{
+  const model=browserAnalysisModel();
+  if(!model)return state;
+  return {...state,projects:state.projects.map((project)=>project.id===state.activeProjectId?{...project,analysisModel:model}:project)};
+}
+
+export async function loadStudioState():Promise<MangaStudioState|null>{
+  if(typeof indexedDB==="undefined")return null;
+  const db=await openDb();
+  const state=await new Promise<MangaStudioState|null>((resolve,reject)=>{const tx=db.transaction(STORE,"readonly");const req=tx.objectStore(STORE).get(STATE_KEY);req.onsuccess=()=>resolve((req.result as MangaStudioState|undefined)||null);req.onerror=()=>reject(req.error)});
+  if(!state?.projects?.length)return state;
+  const projects=state.projects.map((project)=>migrateProject(project));
+  return applyBrowserModel({activeProjectId:projects.some((p)=>p.id===state.activeProjectId)?state.activeProjectId:projects[0].id,projects});
+}
+
+export async function saveStudioState(state:MangaStudioState):Promise<void>{
+  if(typeof indexedDB==="undefined")return;
+  const db=await openDb();
+  const normalized=applyBrowserModel(state);
+  await new Promise<void>((resolve,reject)=>{const tx=db.transaction(STORE,"readwrite");tx.objectStore(STORE).put(normalized,STATE_KEY);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error)});
+}
