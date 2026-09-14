@@ -32,7 +32,7 @@ export async function POST(request:Request){
     const sheet=view==="sheet";
     const result=await generateImageWithFallback({prompt,seed,width:sheet?896:512,height:sheet?1024:512,referenceImages:[]});
 
-    return NextResponse.json({imageDataUrl:result.imageDataUrl,sourceUrl:result.sourceUrl||result.imageDataUrl,model:result.model,provider:result.provider,seed:result.seed,view,capabilities:result.capabilities,fallbackUsed:result.fallbackUsed||false,primaryError:result.primaryError,warning:result.warning});
+    return NextResponse.json({imageDataUrl:result.imageDataUrl,sourceUrl:result.sourceUrl,model:result.model,provider:result.provider,seed:result.seed,view,capabilities:result.capabilities,fallbackUsed:result.fallbackUsed||false,primaryError:result.primaryError,warning:result.warning});
   }catch(error){
     console.error("Continuity character reference generation failed",error);
     return NextResponse.json({error:error instanceof Error?error.message:"Character reference generation failed"},{status:502});
