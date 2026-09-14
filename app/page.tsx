@@ -1,9 +1,9 @@
 import {AnalysisModelSelector} from "@/components/analysis-model-selector";
-import {CinematicContinuityStudio} from "@/components/cinematic-continuity-studio";
+import {StoryFrameWorkspace} from "@/components/storyframe-workspace";
 
 export default function HomePage(){
   return <>
     <AnalysisModelSelector/>
-    <CinematicContinuityStudio/>
+    <StoryFrameWorkspace/>
   </>;
 }
