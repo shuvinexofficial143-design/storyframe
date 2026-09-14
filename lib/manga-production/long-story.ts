@@ -3,6 +3,7 @@ import {xkiroJsonCompletion} from "../xkiro";
 import {isStoryAnalysisModel} from "../story-analysis-models";
 import {MANGA_STYLE_PRESETS,type MangaCharacterState,type MangaMasterAnalysis} from "./types";
 import {MANGA_STYLE_PROMPTS} from "./presets";
+import {normalizeMangaStructuredData} from "./structured-normalize";
 import type {MangaMasterInput} from "./planner";
 
 const Dialogue=z.object({speaker:z.string().default(""),text:z.string().default(""),emotion:z.string().default("neutral"),bubbleType:z.enum(["speech","thought","shout","whisper","narration"]).default("speech")});
@@ -28,11 +29,13 @@ function issueSummary(error:z.ZodError){return error.issues.slice(0,12).map((iss
 async function requestValidated<T>(model:MangaMasterInput["analysisModel"],systemPrompt:string,userPrompt:string,schema:z.ZodType<T>,maxTokens:number){
   if(!isStoryAnalysisModel(model))throw new Error("Unsupported xKiro manga analysis model.");
   let completion=await xkiroJsonCompletion({model,systemPrompt,userPrompt,temperature:.1,maxTokens});
-  let parsed=schema.safeParse(completion.json);
+  let normalized=normalizeMangaStructuredData(completion.json);
+  let parsed=schema.safeParse(normalized);
   if(!parsed.success){
-    const repair=`${userPrompt}\n\nREPAIR RETRY: Previous JSON failed schema validation: ${issueSummary(parsed.error)}. Return the COMPLETE corrected JSON object only. Previous JSON: ${JSON.stringify(completion.json).slice(0,40000)}`;
+    const repair=`${userPrompt}\n\nREPAIR RETRY: Previous JSON failed schema validation: ${issueSummary(parsed.error)}. Return the COMPLETE corrected JSON object only. Previous JSON: ${JSON.stringify(normalized).slice(0,40000)}`;
     completion=await xkiroJsonCompletion({model,systemPrompt,userPrompt:repair,temperature:.03,maxTokens});
-    parsed=schema.safeParse(completion.json);
+    normalized=normalizeMangaStructuredData(completion.json);
+    parsed=schema.safeParse(normalized);
   }
   if(!parsed.success)throw new Error(`Long-story manga analysis returned incomplete structured data: ${issueSummary(parsed.error)}`);
   return parsed.data;
