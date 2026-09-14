@@ -8,6 +8,18 @@ function selectedImage(panel?:MangaPanel){
   return panel.versions.find((version)=>version.id===panel.selectedVersionId)?.imageDataUrl||panel.versions.at(-1)?.imageDataUrl;
 }
 
+function characterReferencePriority(character:MangaProject["characters"][number]){
+  const byType=(type:MangaProject["characters"][number]["referenceImages"][number]["type"])=>character.referenceImages.find((item)=>item.type===type)?.url;
+  return [
+    character.manualReferenceImage,
+    byType("primary"),
+    byType("sheet"),
+    byType("three-quarter"),
+    byType("side"),
+    byType("full-body")
+  ].filter((value):value is string=>Boolean(value));
+}
+
 export function compileMangaPanelPrompt(input:{project:MangaProject;production:MangaChapterProduction;page:MangaPage;panel:MangaPanel;previousPanel?:MangaPanel;stronger?:boolean}){
   const {project,production,page,panel,previousPanel}=input;
   const characterBlocks:string[]=[];
@@ -28,8 +40,12 @@ export function compileMangaPanelPrompt(input:{project:MangaProject;production:M
         state?`CURRENT PANEL STATE: location ${state.currentLocation}; position ${state.position}; direction ${state.bodyDirection}; pose ${state.pose}; expression ${state.expression}; held objects ${state.heldObjects.join(", ")||"none"}; injuries ${state.injuries.join(", ")||"none"}; dirty clothes ${state.dirtyClothes}; wet clothes ${state.wetClothes}.`:"",
         `Consistency: ${character.negativeChanges.join("; ")}.`
       ].filter(Boolean).join(" "));
-      const primary=character.manualReferenceImage||character.referenceImages[0]?.url;
-      if(primary)referenceImages.push(primary);
+
+      // Prefer a canonical portrait plus one alternate identity view/sheet when available.
+      // The final provider request remains capped at four total references, so two-character
+      // panels naturally prioritize identity evidence before location/previous-panel imagery.
+      const identityRefs=[...new Set(characterReferencePriority(character))].slice(0,2);
+      referenceImages.push(...identityRefs);
     }else{
       characterBlocks.push(`${name}: preserve the exact established face, hairstyle, age, body proportions, outfit and accessories from earlier manga panels.`);
     }
