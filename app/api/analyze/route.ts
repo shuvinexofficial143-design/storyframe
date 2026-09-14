@@ -1,7 +1,7 @@
 import {NextResponse} from "next/server";
 import {z} from "zod";
 import {hashString,hasPollinations,pollinationsAnalyzeStory} from "@/lib/pollinations";
-import {DEFAULT_STORY_ANALYSIS_MODEL,STORY_ANALYSIS_MODELS} from "@/lib/story-analysis-models";
+import {DEFAULT_STORY_ANALYSIS_MODEL,STORY_ANALYSIS_MODELS,isStoryAnalysisModel,type StoryAnalysisModel} from "@/lib/story-analysis-models";
 import {hasXKiro,xkiroAnalyzeStory} from "@/lib/xkiro";
 
 const Input=z.object({
@@ -13,11 +13,19 @@ const shots=["Extreme Wide Shot","Wide Shot","Medium Shot","Medium Close-Up","Cl
 const angles=["Eye Level","Three Quarter","Low Angle","High Angle","POV"];
 const stop=new Set(["The","He","She","They","This","That","When","After","Before","Inside","Outside","Blue","Ancient"]);
 const locRules:[[string,RegExp],...Array<[string,RegExp]>]=[["Internet Cafe",/internet cafe|café|cafe|shop|दुकान/i],["Ancient Haveli",/haveli|हवेली|महल|old mansion|palace/i],["Courtyard",/courtyard|दालान|आंगन/i],["Ancient City",/city|street|town|नगर|शहर|सड़क/i],["Forest",/forest|woods|जंगल/i],["Temple",/temple|मंदिर/i],["Marketplace",/market|bazaar|बाजार/i],["Underground Chamber",/crypt|cellar|basement|underground|तहखाना/i]];
+const MODEL_COOKIE="storyframe-analysis-model";
 
 const ExternalCharacter=z.object({name:z.string(),role:z.string().default("Supporting character"),appearance:z.string().default("Maintain a stable face and body design"),outfit:z.string().default("Keep costume continuity"),consistencyNotes:z.string().default("Maintain the same visual identity across scenes")});
 const ExternalLocation=z.object({name:z.string(),architecture:z.string().default("Preserve the major environment design"),lighting:z.string().default("Use coherent cinematic lighting"),continuity:z.string().default("Preserve props and layout across scenes")});
 const ExternalScene=z.object({sourceText:z.string(),description:z.string(),characterNames:z.array(z.string()).default([]),locationName:z.string().optional(),cameraShot:z.string().default("Medium Shot"),cameraAngle:z.string().default("Eye Level"),duration:z.coerce.number().min(2).max(10).default(4),imagePrompt:z.string(),negativePrompt:z.string().default("text, watermark, low quality, deformed hands"),continuityNotes:z.string().default("Carry appearance, costume and environment continuity forward")});
 const ExternalPayload=z.object({summary:z.string(),characters:z.array(ExternalCharacter).default([]),locations:z.array(ExternalLocation).default([]),scenes:z.array(ExternalScene).default([])});
+
+function liveSelectedModel(request:Request,fallback:StoryAnalysisModel){
+  const header=request.headers.get("cookie")||"";
+  const match=header.match(/(?:^|;\s*)storyframe-analysis-model=([^;]+)/);
+  if(!match)return fallback;
+  try{const value=decodeURIComponent(match[1]);return isStoryAnalysisModel(value)?value:fallback}catch{return fallback}
+}
 
 function heuristicAnalyze(story:string,visualStyle:string){
   const sentences=story.replace(/\s+/g," ").split(/(?<=[.!?।])\s+/).map((sentence)=>sentence.trim()).filter(Boolean);
@@ -46,7 +54,8 @@ export async function POST(req:Request){
   try{
     const parsed=Input.safeParse(await req.json());
     if(!parsed.success)return NextResponse.json({error:"Invalid story or model selection"},{status:400});
-    const {story,visualStyle,analysisModel}=parsed.data;
+    const {story,visualStyle}=parsed.data;
+    const analysisModel=liveSelectedModel(req,parsed.data.analysisModel);
     if(hasXKiro()){
       try{const analysis=await xkiroAnalyzeStory({story,visualStyle,model:analysisModel});const validated=ExternalPayload.parse(analysis.json);if(validated.scenes.length)return NextResponse.json(normalizeExternal(validated,visualStyle,`xKiro · ${analysis.model}`))}catch(error){console.error("xKiro analysis failed; trying fallback",error)}
     }
