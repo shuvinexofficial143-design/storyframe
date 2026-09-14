@@ -12,7 +12,7 @@ const Input=z.object({scene:SceneInput,characters:z.array(CharacterInput).defaul
 export async function POST(req:Request){
   try{
     const parsed=Input.safeParse(await req.json());
-    if(!parsed.success) return NextResponse.json({error:"Invalid scene generation request"},{status:400});
+    if(!parsed.success)return NextResponse.json({error:"Invalid scene generation request"},{status:400});
 
     const {scene,characters,location,visualStyle,aspectRatio}=parsed.data;
     const sceneData=scene as Scene;
@@ -30,7 +30,7 @@ export async function POST(req:Request){
 
     return NextResponse.json({
       image:result.imageDataUrl,
-      sourceUrl:result.sourceUrl||result.imageDataUrl,
+      sourceUrl:result.sourceUrl,
       provider:result.provider,
       seed:result.seed,
       prompt:finalPrompt,
