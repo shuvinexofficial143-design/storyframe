@@ -1,3 +1,4 @@
+import type {StoryAnalysisModel} from "../story-analysis-models";
 import type {VisualCategory} from "./storyboard-prompt";
 import type {CharacterCostumeLock,CharacterIdentityLock,CharacterStateVariant,ObjectReference,ProjectVisualBible,ReferenceImage,SceneContinuityRecord,ShotDefinition} from "./types";
 
@@ -5,7 +6,7 @@ export type CharacterReference={id:string;name:string;role:string;visualDescript
 export type LocationReference={id:string;name:string;architectureStyle:string;lighting:string;colorPalette:string;referencePrompt:string;geometryIdentity:string;materials:string;importantFeatures:string[];locked:boolean;seedOffset:number;referenceImages:ReferenceImage[];createdInChapterId:string;updatedAt:string};
 export type MangaScene={id:string;sceneNumber:number;title:string;visualCategory:VisualCategory;sourceText:string;description:string;characterNames:string[];characterIds:string[];locationNames:string[];locationId?:string;propIds:string[];vehicleIds:string[];continuityFrom?:string;cameraShot:string;cameraAngle:string;shot:ShotDefinition;action:string;emotion:string;lightingStyle:string;timeOfDay:string;weather:string;storyState:string;characterStates:Record<string,string>;continuityNotes:string;baseImagePrompt:string;imagePrompt:string;narrationScript:string;seed:number;variationIndex:number;seedLocked:boolean;promptLocked:boolean;imageDataUrl?:string;generatedImageUrl?:string;imageModel?:string;provider?:string;status:"idle"|"generating"|"complete"|"error";error?:string};
 export type MangaChapter={id:string;title:string;story:string;summary:string;scenes:MangaScene[];analysisProvider?:string;createdAt:string;updatedAt:string};
-export type MangaProject={id:string;name:string;activeChapterId:string;chapters:MangaChapter[];visualBible:ProjectVisualBible;characters:CharacterReference[];locations:LocationReference[];props:ObjectReference[];vehicles:ObjectReference[];sceneContinuity:SceneContinuityRecord[];createdAt:string;updatedAt:string};
+export type MangaProject={id:string;name:string;analysisModel:StoryAnalysisModel;activeChapterId:string;chapters:MangaChapter[];visualBible:ProjectVisualBible;characters:CharacterReference[];locations:LocationReference[];props:ObjectReference[];vehicles:ObjectReference[];sceneContinuity:SceneContinuityRecord[];createdAt:string;updatedAt:string};
 export type MangaStudioState={activeProjectId:string;projects:MangaProject[]};
 
 export type CharacterStateDetail={characterName:string;stateId:string;stateName:string;description:string;outfitOverride?:string;visualEffects:string[]};
