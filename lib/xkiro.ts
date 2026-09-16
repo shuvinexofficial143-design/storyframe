@@ -67,13 +67,37 @@ function repairCommonJson(value:string):string{
   return output;
 }
 
+function closeIncompleteJson(value:string):string{
+  let output=value.trim();if(!output)return output;
+  const stack:string[]=[];let inString=false,escaped=false;
+  for(const char of output){
+    if(inString){
+      if(escaped){escaped=false;continue}
+      if(char==="\\"){escaped=true;continue}
+      if(char==='"')inString=false;
+      continue;
+    }
+    if(char==='"'){inString=true;continue}
+    if(char==="{"||char==="[")stack.push(char);
+    else if(char==="}"||char==="]"){
+      const expected=char==="}"?"{":"[";
+      if(stack.at(-1)===expected)stack.pop();
+    }
+  }
+  if(inString){if(escaped&&output.endsWith("\\"))output=output.slice(0,-1);output+='"'}
+  output=output.trimEnd().replace(/,\s*$/,"");
+  if(/:\s*$/.test(output))output+="null";
+  while(stack.length)output+=stack.pop()==="{"?"}":"]";
+  return output;
+}
+
 export function extractFirstJsonObject(value:string){
   const cleaned=value.replace(/^\uFEFF/,"").replace(/^```(?:json)?\s*/i,"").replace(/\s*```$/i,"").trim();
-  const candidate=extractBalancedObject(cleaned);
-  if(!candidate)throw new XKiroRequestError("xKiro returned malformed JSON.","invalid_response",502);
-  try{return JSON.parse(candidate)}catch{
-    try{return JSON.parse(repairCommonJson(candidate))}catch{throw new XKiroRequestError("xKiro returned malformed JSON.","invalid_response",502)}
-  }
+  const balanced=extractBalancedObject(cleaned);const start=cleaned.indexOf("{");const raw=balanced??(start>=0?cleaned.slice(start):"");
+  if(!raw)throw new XKiroRequestError("xKiro returned malformed JSON.","invalid_response",502);
+  const repaired=repairCommonJson(raw);const candidates=balanced?[raw,repaired]:[raw,repaired,closeIncompleteJson(repaired)];
+  for(const candidate of candidates){try{return JSON.parse(candidate)}catch{}}
+  throw new XKiroRequestError("xKiro returned malformed JSON.","invalid_response",502);
 }
 
 function contentText(content:unknown){if(typeof content==="string")return content;if(Array.isArray(content))return content.map((part)=>typeof part==="string"?part:part&&typeof part==="object"&&"text" in part&&typeof (part as {text?:unknown}).text==="string"?(part as {text:string}).text:"").join("");if(content&&typeof content==="object")return JSON.stringify(content);return ""}

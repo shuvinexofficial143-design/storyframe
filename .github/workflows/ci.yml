@@ -9,6 +9,7 @@ jobs:
         with:
           node-version: 22
       - run: npm install
+      - run: npm run test:manga-structured
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run build
