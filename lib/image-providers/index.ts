@@ -14,6 +14,7 @@ const providers:Record<string,ImageProvider>={
 // compatibility fields duplicate the same compact data URL.
 const MAX_EMBEDDED_IMAGE_BYTES=220_000;
 const MAX_EMBEDDED_EDGE=1024;
+const GEMINI_IMAGE_RETRY_DELAYS_MS=[2_000,5_000] as const;
 
 export function getImageProvider(id="gemini"){
   return providers[id]||geminiImageProvider;
@@ -131,15 +132,40 @@ async function executeProvider(provider:ImageProvider,input:ImageGenerationInput
   };
 }
 
+function isRetryableProviderFailure(error:unknown){
+  if(!(error instanceof Error))return false;
+  return /\b429\b|resource exhausted|quota|rate limit|too many requests|temporar(?:y|ily) unavailable|\b50[0234]\b|timed out|timeout/i.test(error.message);
+}
+
+async function executePreferredWithRetry(provider:ImageProvider,input:ImageGenerationInput){
+  try{
+    return await executeProvider(provider,input);
+  }catch(firstError){
+    if(provider.id!=="gemini"||!isRetryableProviderFailure(firstError))throw firstError;
+    let lastError:unknown=firstError;
+    for(const delayMs of GEMINI_IMAGE_RETRY_DELAYS_MS){
+      console.warn("Gemini image generation temporarily unavailable; retrying after backoff.",{delayMs,error:lastError instanceof Error?lastError.message:String(lastError)});
+      await new Promise<void>((resolve)=>setTimeout(resolve,delayMs));
+      try{
+        return await executeProvider(provider,input);
+      }catch(error){
+        lastError=error;
+        if(!isRetryableProviderFailure(error))throw error;
+      }
+    }
+    throw lastError;
+  }
+}
+
 export async function generateImageWithFallback(input:ImageGenerationInput):Promise<ImageGenerationResult>{
   const desired=getImageProvider(preferredProviderId());
   if(desired.id==="pollinations")return executeProvider(desired,input);
 
   try{
-    return await executeProvider(desired,input);
+    return await executePreferredWithRetry(desired,input);
   }catch(error){
     const primaryError=error instanceof Error?error.message:"Primary provider failed";
     const fallback=await executeProvider(pollinationsImageProvider,{...input,model:pollinationsImageProvider.defaultModel,referenceImages:[]});
-    return {...fallback,fallbackUsed:true,primaryError,warning:`${desired.name} primary generation was unavailable, so StoryFrame used Pollinations flux-anime fallback. ${primaryError}`};
+    return {...fallback,fallbackUsed:true,primaryError,warning:`${desired.name} primary generation was unavailable after retrying, so StoryFrame used Pollinations flux-anime fallback. ${primaryError}`};
   }
 }
