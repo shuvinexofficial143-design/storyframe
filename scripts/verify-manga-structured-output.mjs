@@ -14,6 +14,7 @@ const transpile=(fileName)=>ts.transpileModule(fs.readFileSync(path.join(root,fi
 try{
   fs.writeFileSync(path.join(tempDir,"structured-normalize.mjs"),transpile("lib/manga-production/structured-normalize.ts"));
   fs.writeFileSync(path.join(tempDir,"story-analysis-models.mjs"),transpile("lib/story-analysis-models.ts"));
+  fs.writeFileSync(path.join(tempDir,"pacing-policy.mjs"),transpile("lib/manga-production/pacing-policy.ts"));
   const vertexStory=transpile("lib/vertex-story.ts").replace('"./story-analysis-models"','"./story-analysis-models.mjs"');
   fs.writeFileSync(path.join(tempDir,"vertex-story.mjs"),vertexStory);
   const xkiro=transpile("lib/xkiro.ts")
@@ -22,6 +23,7 @@ try{
   fs.writeFileSync(path.join(tempDir,"xkiro.mjs"),xkiro);
 
   const {normalizeMangaStructuredData}=await import(pathToFileURL(path.join(tempDir,"structured-normalize.mjs")).href);
+  const {estimateAdaptivePacing,partitionPagePanelCounts,partitionPlanningChunkCounts}=await import(pathToFileURL(path.join(tempDir,"pacing-policy.mjs")).href);
   const {parseVertexJsonObject}=await import(pathToFileURL(path.join(tempDir,"vertex-story.mjs")).href);
   const {extractFirstJsonObject}=await import(pathToFileURL(path.join(tempDir,"xkiro.mjs")).href);
 
@@ -89,7 +91,21 @@ try{
   assert.deepEqual(parseVertexJsonObject('{"pages":[{"id":1},{"id":2}'),{pages:[{id:1},{id:2}]});
   assert.deepEqual(parseVertexJsonObject('{"text":"hello\nworld"}'),{text:"hello\nworld"});
 
-  console.log("Manga structured-output regression checks passed.");
+  const syntheticStory=Array.from({length:320},(_,index)=>`word${index}`).join(" ");
+  const fast=estimateAdaptivePacing(syntheticStory,"Fast");
+  const balanced=estimateAdaptivePacing(syntheticStory,"Balanced");
+  const cinematic=estimateAdaptivePacing(syntheticStory,"Cinematic");
+  assert.equal(cinematic.targetBeats,40);
+  assert.ok(cinematic.targetBeats>balanced.targetBeats&&balanced.targetBeats>fast.targetBeats);
+  const panelCounts=partitionPagePanelCounts(40,"Cinematic");
+  assert.equal(panelCounts.length,12);
+  assert.equal(panelCounts.reduce((sum,value)=>sum+value,0),40);
+  assert.ok(panelCounts.every((value)=>value>=3&&value<=5));
+  const planningChunks=partitionPlanningChunkCounts(40,"Cinematic");
+  assert.equal(planningChunks.reduce((sum,value)=>sum+value,0),40);
+  assert.ok(planningChunks.every((value)=>value>=6&&value<=8));
+
+  console.log("Manga structured-output and adaptive-pacing regression checks passed.");
 }finally{
   fs.rmSync(tempDir,{recursive:true,force:true});
 }

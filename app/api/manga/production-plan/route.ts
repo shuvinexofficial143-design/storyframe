@@ -3,6 +3,8 @@ import {z} from "zod";
 import {analyzeMangaMaster} from "@/lib/manga-production/planner";
 import {planMangaPagesSafe} from "@/lib/manga-production/planner-safe";
 import {analyzeLongMangaMaster,shouldUseLongStoryAnalysis} from "@/lib/manga-production/long-story";
+import {refineMangaMasterForPacing} from "@/lib/manga-production/adaptive-master";
+import {MANGA_PACING_PRESETS} from "@/lib/manga-production/pacing-policy";
 import {MANGA_STYLE_PRESETS} from "@/lib/manga-production/types";
 import {STORY_ANALYSIS_MODELS,isStoryAnalysisModel,storyAnalysisProviderLabel,type StoryAnalysisModel} from "@/lib/story-analysis-models";
 import {XKiroRequestError} from "@/lib/xkiro";
@@ -10,7 +12,8 @@ import {XKiroRequestError} from "@/lib/xkiro";
 const Base=z.object({
   action:z.enum(["master","pages"]),
   analysisModel:z.enum(STORY_ANALYSIS_MODELS),
-  stylePreset:z.enum(MANGA_STYLE_PRESETS)
+  stylePreset:z.enum(MANGA_STYLE_PRESETS),
+  pacingPreset:z.enum(MANGA_PACING_PRESETS).default("Cinematic")
 });
 
 const Master=Base.extend({
@@ -62,11 +65,13 @@ export async function POST(request:Request){
       const analyzed=shouldUseLongStoryAnalysis(parsed.data.story)
         ?await analyzeLongMangaMaster(masterInput)
         :await analyzeMangaMaster(masterInput);
-      return NextResponse.json({kind:"master",data:{...analyzed,provider}});
+      const refined=await refineMangaMasterForPacing({analysisModel,pacingPreset:parsed.data.pacingPreset,story:parsed.data.story,master:analyzed});
+      return NextResponse.json({kind:"master",data:{...refined,provider:`${provider} · adaptive ${parsed.data.pacingPreset.toLowerCase()} pacing`}});
     }
 
     const planned=await planMangaPagesSafe({
       analysisModel,
+      pacingPreset:parsed.data.pacingPreset,
       stylePreset:parsed.data.stylePreset,
       storySummary:parsed.data.storySummary,
       beats:parsed.data.beats as never,
@@ -77,10 +82,10 @@ export async function POST(request:Request){
       locations:parsed.data.locations,
       props:parsed.data.props
     });
-    return NextResponse.json({kind:"pages",data:{...planned,provider}});
+    return NextResponse.json({kind:"pages",data:{...planned,provider:`${provider} · adaptive ${parsed.data.pacingPreset.toLowerCase()} pacing`}});
   }catch(error){
     if(error instanceof XKiroRequestError){
-      console.error("Manga production xKiro request failed",{code:error.code,status:error.status,message:error.message});
+      console.error("Manga production story-model request failed",{code:error.code,status:error.status,message:error.message});
       return NextResponse.json({error:error.message},{status:error.status||502});
     }
     console.error("Manga production planning failed",error);
