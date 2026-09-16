@@ -63,39 +63,42 @@ export async function POST(request:Request){
   try{
     const parsed=Input.safeParse(await request.json());
     if(!parsed.success)return NextResponse.json({error:"Invalid manga production request",details:parsed.error.flatten()},{status:400});
-    const analysisModel=liveSelectedModel(request,parsed.data.analysisModel);
+    const data=parsed.data;
+    const analysisModel=liveSelectedModel(request,data.analysisModel);
 
-    if(parsed.data.action==="master"){
+    if(data.action==="master"){
+      const masterData=data;
       const result=await withStoryModelFallback({
         model:analysisModel,
         run:async(model)=>{
-          const masterInput={...parsed.data,analysisModel:model};
-          const analyzed=shouldUseLongStoryAnalysis(parsed.data.story)
+          const masterInput={...masterData,analysisModel:model};
+          const analyzed=shouldUseLongStoryAnalysis(masterData.story)
             ?await analyzeLongMangaMaster(masterInput)
             :await analyzeMangaMaster(masterInput);
-          return refineMangaMasterForPacing({analysisModel:model,pacingPreset:parsed.data.pacingPreset,story:parsed.data.story,master:analyzed});
+          return refineMangaMasterForPacing({analysisModel:model,pacingPreset:masterData.pacingPreset,story:masterData.story,master:analyzed});
         }
       });
-      return NextResponse.json({kind:"master",data:{...result.data,provider:providerLabel(result.model,result.fallbackUsed,parsed.data.pacingPreset)}});
+      return NextResponse.json({kind:"master",data:{...result.data,provider:providerLabel(result.model,result.fallbackUsed,masterData.pacingPreset)}});
     }
 
+    const pagesData=data;
     const result=await withStoryModelFallback({
       model:analysisModel,
       run:(model)=>planMangaPagesSafe({
         analysisModel:model,
-        pacingPreset:parsed.data.pacingPreset,
-        stylePreset:parsed.data.stylePreset,
-        storySummary:parsed.data.storySummary,
-        beats:parsed.data.beats as never,
-        startBeatIndex:parsed.data.startBeatIndex,
-        pageStartNumber:parsed.data.pageStartNumber,
-        previousState:parsed.data.previousState as never,
-        characters:parsed.data.characters,
-        locations:parsed.data.locations,
-        props:parsed.data.props
+        pacingPreset:pagesData.pacingPreset,
+        stylePreset:pagesData.stylePreset,
+        storySummary:pagesData.storySummary,
+        beats:pagesData.beats as never,
+        startBeatIndex:pagesData.startBeatIndex,
+        pageStartNumber:pagesData.pageStartNumber,
+        previousState:pagesData.previousState as never,
+        characters:pagesData.characters,
+        locations:pagesData.locations,
+        props:pagesData.props
       })
     });
-    return NextResponse.json({kind:"pages",data:{...result.data,provider:providerLabel(result.model,result.fallbackUsed,parsed.data.pacingPreset)}});
+    return NextResponse.json({kind:"pages",data:{...result.data,provider:providerLabel(result.model,result.fallbackUsed,pagesData.pacingPreset)}});
   }catch(error){
     if(error instanceof XKiroRequestError){
       console.error("Manga production story-model request failed",{code:error.code,status:error.status,message:error.message});
