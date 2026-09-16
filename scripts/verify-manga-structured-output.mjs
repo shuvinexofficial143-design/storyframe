@@ -22,6 +22,7 @@ try{
   fs.writeFileSync(path.join(tempDir,"xkiro.mjs"),xkiro);
 
   const {normalizeMangaStructuredData}=await import(pathToFileURL(path.join(tempDir,"structured-normalize.mjs")).href);
+  const {parseVertexJsonObject}=await import(pathToFileURL(path.join(tempDir,"vertex-story.mjs")).href);
   const {extractFirstJsonObject}=await import(pathToFileURL(path.join(tempDir,"xkiro.mjs")).href);
 
   const master=normalizeMangaStructuredData({
@@ -83,6 +84,10 @@ try{
   assert.deepEqual(extractFirstJsonObject('{"timeline":[{"event":"a"},{"event":"b"'),{timeline:[{event:"a"},{event:"b"}]});
   assert.deepEqual(extractFirstJsonObject('{"storySummary":"hello","timeline":'),{storySummary:"hello",timeline:null});
   assert.deepEqual(extractFirstJsonObject('{"text":"hello\nworld"}'),{text:"hello\nworld"});
+
+  assert.deepEqual(parseVertexJsonObject('```json\n{"pages":[{"id":1,}],}\n```'),{pages:[{id:1}]});
+  assert.deepEqual(parseVertexJsonObject('{"pages":[{"id":1},{"id":2}'),{pages:[{id:1},{id:2}]});
+  assert.deepEqual(parseVertexJsonObject('{"text":"hello\nworld"}'),{text:"hello\nworld"});
 
   console.log("Manga structured-output regression checks passed.");
 }finally{
