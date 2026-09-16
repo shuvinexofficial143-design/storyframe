@@ -1,3 +1,5 @@
+import type {MangaPacingPreset} from "./pacing-policy";
+
 export const MANGA_STYLE_PRESETS=[
   "Classic Black & White Manga",
   "Shonen Manga",
@@ -96,7 +98,7 @@ export type MangaPage={
 export type MangaContinuityState={currentPage:number;timeline:string;timeOfDay:string;currentLocation:string;characters:Record<string,MangaCharacterState>;activeProps:string[];previousPageEndState:string};
 export type StoryCoverageReport={percent:number;coveredBeatIds:string[];missingBeats:Array<{beatId:string;storyBeat:string;sourceText:string}>};
 
-export type MangaChapterProduction={schemaVersion:1;stylePreset:MangaStylePreset;storySummary:string;timeline:MangaTimelineEvent[];beats:MangaStoryBeat[];locationProfiles:MangaLocationProfile[];propStates:MangaPropState[];initialCharacterStates:Record<string,MangaCharacterState>;pages:MangaPage[];nextBeatIndex:number;continuityState:MangaContinuityState;coverage:StoryCoverageReport;analysisProvider?:string;updatedAt:string};
+export type MangaChapterProduction={schemaVersion:1;stylePreset:MangaStylePreset;pacingPreset?:MangaPacingPreset;storySummary:string;timeline:MangaTimelineEvent[];beats:MangaStoryBeat[];locationProfiles:MangaLocationProfile[];propStates:MangaPropState[];initialCharacterStates:Record<string,MangaCharacterState>;pages:MangaPage[];nextBeatIndex:number;continuityState:MangaContinuityState;coverage:StoryCoverageReport;analysisProvider?:string;updatedAt:string};
 
 export type MangaMasterCharacter={name:string;role:string;gender:string;approximateAge:string;face:{shape:string;eyes:string;eyebrows:string;nose:string;mouth:string;specialFeatures:string};hair:{color:string;style:string;length:string};body:{build:string;height:string;proportions:string};defaultOutfit:string;currentOutfit:string;accessories:string[];importantObjects:string[];consistencyNotes:string};
 export type MangaMasterAnalysis={storySummary:string;characters:MangaMasterCharacter[];locations:MangaLocationProfile[];props:MangaPropState[];timeline:MangaTimelineEvent[];beats:MangaStoryBeat[];initialCharacterStates:Record<string,MangaCharacterState>;provider:string};
