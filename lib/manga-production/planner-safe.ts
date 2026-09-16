@@ -11,18 +11,20 @@ function isSemanticPlannerError(error:unknown){
 
 /**
  * Split a remaining beat count into safe 3-5 beat groups.
- * Every group can be represented by exactly one valid manga page, so a fallback
- * request cannot legally leave a 1-2 beat tail behind.
+ * Prefer 3-beat groups because the base planner must emit at least 3 panels,
+ * which makes it much harder for a model to silently consume only a prefix.
  */
 export function partitionBeatCounts(total:number){
   if(total<3)return [];
-  for(let groups=Math.ceil(total/5);groups<=Math.floor(total/3);groups+=1){
-    const base=Math.floor(total/groups);
-    const extra=total%groups;
-    const counts=Array.from({length:groups},(_,index)=>base+(index<extra?1:0));
-    if(counts.every((count)=>count>=3&&count<=5))return counts;
+  const threes=Math.floor(total/3);
+  const remainder=total%3;
+  if(remainder===0)return Array.from({length:threes},()=>3);
+  if(remainder===1){
+    if(threes<1)return total===4?[4]:[];
+    return [...Array.from({length:Math.max(0,threes-1)},()=>3),4];
   }
-  return [];
+  if(threes<1)return total===5?[5]:[];
+  return [...Array.from({length:Math.max(0,threes-1)},()=>3),5];
 }
 
 async function planExactGroup(input:PagePlannerInput,maxAttempts=3){
