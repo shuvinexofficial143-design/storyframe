@@ -21,11 +21,16 @@ try{
     .replace('"./story-analysis-models"','"./story-analysis-models.mjs"')
     .replace('"./vertex-story"','"./vertex-story.mjs"');
   fs.writeFileSync(path.join(tempDir,"xkiro.mjs"),xkiro);
+  const fallback=transpile("lib/story-model-fallback.ts")
+    .replace('"./story-analysis-models"','"./story-analysis-models.mjs"')
+    .replace('"./xkiro"','"./xkiro.mjs"');
+  fs.writeFileSync(path.join(tempDir,"story-model-fallback.mjs"),fallback);
 
   const {normalizeMangaStructuredData}=await import(pathToFileURL(path.join(tempDir,"structured-normalize.mjs")).href);
   const {estimateAdaptivePacing,partitionPagePanelCounts,partitionPlanningChunkCounts}=await import(pathToFileURL(path.join(tempDir,"pacing-policy.mjs")).href);
   const {parseVertexJsonObject}=await import(pathToFileURL(path.join(tempDir,"vertex-story.mjs")).href);
   const {extractFirstJsonObject}=await import(pathToFileURL(path.join(tempDir,"xkiro.mjs")).href);
+  const {isRetryableVertexStoryFailure,withStoryModelFallback}=await import(pathToFileURL(path.join(tempDir,"story-model-fallback.mjs")).href);
 
   const master=normalizeMangaStructuredData({
     storySummary:"Test story",
@@ -105,7 +110,25 @@ try{
   assert.equal(planningChunks.reduce((sum,value)=>sum+value,0),40);
   assert.ok(planningChunks.every((value)=>value>=6&&value<=8));
 
-  console.log("Manga structured-output and adaptive-pacing regression checks passed.");
+  assert.equal(isRetryableVertexStoryFailure(new Error("Vertex Gemini story request failed (429): Resource exhausted.")),true);
+  assert.equal(isRetryableVertexStoryFailure(new Error("Vertex Gemini story request failed (400): bad request")),false);
+  const oldKey=process.env.XKIRO_API_KEY;
+  process.env.XKIRO_API_KEY="regression-test-key";
+  const attempted=[];
+  const fallbackResult=await withStoryModelFallback({
+    model:"google/gemini-3.1-pro-preview",
+    run:async(model)=>{
+      attempted.push(model);
+      if(model==="google/gemini-3.1-pro-preview")throw new Error("Vertex Gemini story request failed (429): Resource exhausted.");
+      return "planned";
+    }
+  });
+  assert.deepEqual(attempted,["google/gemini-3.1-pro-preview","mistralai/mistral-large-2512"]);
+  assert.equal(fallbackResult.data,"planned");
+  assert.equal(fallbackResult.fallbackUsed,true);
+  if(oldKey===undefined)delete process.env.XKIRO_API_KEY;else process.env.XKIRO_API_KEY=oldKey;
+
+  console.log("Manga structured-output, adaptive-pacing and Vertex-fallback regression checks passed.");
 }finally{
   fs.rmSync(tempDir,{recursive:true,force:true});
 }
