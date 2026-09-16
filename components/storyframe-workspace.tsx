@@ -3,7 +3,7 @@
 import {useState} from "react";
 import {BookOpen,Clapperboard} from "lucide-react";
 import {CinematicContinuityStudio} from "./cinematic-continuity-studio";
-import {MangaProductionStudio} from "./manga-production-studio";
+import {MangaPageProductionStudio} from "./manga-page-production-studio";
 
 const STORAGE_KEY="storyframe-workspace-mode";
 type Mode="manga"|"cinematic";
@@ -23,6 +23,6 @@ export function StoryFrameWorkspace(){
         <button onClick={()=>change("cinematic")} className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold ${mode==="cinematic"?"bg-violet-500 text-white":"border border-white/10 bg-white/5 text-zinc-400"}`}><Clapperboard size={16}/> Cinematic Legacy</button>
       </div>
     </div>
-    {mode==="manga"?<MangaProductionStudio/>:<CinematicContinuityStudio/>}
+    {mode==="manga"?<MangaPageProductionStudio/>:<CinematicContinuityStudio/>}
   </>;
 }

@@ -74,7 +74,24 @@ export type MangaPanel={
   error?:string;
 };
 
-export type MangaPage={id:string;pageNumber:number;pagePurpose:string;startState:string;panelLayout:string;panels:MangaPanel[];endState:string;continuityToNextPage:string;composedImageDataUrl?:string;status:"planned"|"generating"|"generated"|"composed"|"needs-review"};
+export type MangaPage={
+  id:string;
+  pageNumber:number;
+  pagePurpose:string;
+  startState:string;
+  panelLayout:string;
+  panels:MangaPanel[];
+  endState:string;
+  continuityToNextPage:string;
+  rawPageImageDataUrl?:string;
+  composedImageDataUrl?:string;
+  pagePrompt?:string;
+  renderProvider?:string;
+  renderModel?:string;
+  renderSeed?:number;
+  error?:string;
+  status:"planned"|"generating"|"generated"|"composed"|"needs-review";
+};
 
 export type MangaContinuityState={currentPage:number;timeline:string;timeOfDay:string;currentLocation:string;characters:Record<string,MangaCharacterState>;activeProps:string[];previousPageEndState:string};
 export type StoryCoverageReport={percent:number;coveredBeatIds:string[];missingBeats:Array<{beatId:string;storyBeat:string;sourceText:string}>};
