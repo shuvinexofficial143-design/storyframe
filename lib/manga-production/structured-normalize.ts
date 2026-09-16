@@ -23,7 +23,7 @@ const TEXT_FIELDS=new Set([
   "defaultOutfit","currentOutfit","consistencyNotes","architecture","lighting","timeOfDay","continuityNotes","appearance","currentOwner","currentLocation","condition",
   "sourceText","event","storyBeat","locationName","action","reaction","stateAfter","characterName","position","bodyDirection","pose","expression",
   "speaker","text","emotion","pagePurpose","startState","panelLayout","location","characterPositions","cameraShot","cameraAngle","cameraDirection","foreground","midground","background","composition","mood",
-  "continuityFromPreviousPanel","continuityToNextPanel","imagePrompt","negativePrompt","continuityToNextPage","timeline","previousPageEndState","chunkEndState"
+  "continuityFromPreviousPanel","continuityToNextPanel","imagePrompt","negativePrompt","continuityToNextPage","previousPageEndState","chunkEndState"
 ]);
 
 const STRING_ARRAY_FIELDS=new Set([
@@ -93,6 +93,37 @@ function normalizeEnum(value:unknown,allowed:Set<string>,fallback:string):string
   return allowed.has(compact)?compact:fallback;
 }
 
+function timelineEvent(event:string){
+  return {sourceText:"",event,timeOfDay:"unspecified",location:"",characterNames:[],propNames:[]};
+}
+
+function normalizeTimeline(value:unknown,source:Record<string,unknown>,visit:(input:unknown)=>unknown):unknown{
+  // Page/output continuity state uses a compact textual timeline, while the
+  // master manga analysis uses an array of chronological timeline events.
+  const isContinuityTimeline="activeProps" in source||"previousPageEndState" in source;
+  if(isContinuityTimeline)return structuredText(value,"");
+
+  if(value==null)return [];
+  if(Array.isArray(value)){
+    return value.map((item)=>{
+      if(item&&typeof item==="object")return visit(item);
+      const event=structuredText(item,"");
+      return event?timelineEvent(event):null;
+    }).filter((item):item is Exclude<typeof item,null>=>item!==null);
+  }
+  if(typeof value==="object"){
+    const record=value as Record<string,unknown>;
+    if("event" in record||"sourceText" in record||"location" in record)return [visit(record)];
+    const events=Object.entries(record).map(([key,item])=>{
+      const text=structuredText(item,"");
+      return text?timelineEvent(`${humanizeKey(key)}: ${text}`):null;
+    }).filter((item):item is Exclude<typeof item,null>=>item!==null);
+    return events;
+  }
+  const event=structuredText(value,"");
+  return event?[timelineEvent(event)]:[];
+}
+
 export function normalizeMangaStructuredData<T>(value:T):T{
   const visit=(input:unknown):unknown=>{
     if(Array.isArray(input))return input.map((item)=>visit(item));
@@ -102,6 +133,10 @@ export function normalizeMangaStructuredData<T>(value:T):T{
     for(const [key,item] of Object.entries(source)){
       if(key==="layout"){
         output[key]=normalizeLayout(item);
+        continue;
+      }
+      if(key==="timeline"){
+        output[key]=normalizeTimeline(item,source,visit);
         continue;
       }
       // A page's endState is text, while the top-level PageOutput endState is
