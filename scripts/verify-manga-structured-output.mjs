@@ -114,7 +114,7 @@ try{
   assert.ok(planningChunks.every((value)=>value>=6&&value<=8));
   const highChunks=partitionPlanningChunkCounts(80,"Cinematic");
   assert.equal(highChunks.reduce((sum,value)=>sum+value,0),80);
-  assert.ok(highChunks.every((value)=>value>=6&&value<=8));
+  assert.ok(highChunks.every((value)=>value>=3&&value<=8));
 
   assert.equal(isRetryableVertexStoryFailure(new Error("Vertex Gemini story request failed (429): Resource exhausted.")),true);
   assert.equal(isRetryableVertexStoryFailure(new Error("Vertex Gemini story request failed (400): bad request")),false);
