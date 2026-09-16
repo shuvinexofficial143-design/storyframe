@@ -14,7 +14,11 @@ const transpile=(fileName)=>ts.transpileModule(fs.readFileSync(path.join(root,fi
 try{
   fs.writeFileSync(path.join(tempDir,"structured-normalize.mjs"),transpile("lib/manga-production/structured-normalize.ts"));
   fs.writeFileSync(path.join(tempDir,"story-analysis-models.mjs"),transpile("lib/story-analysis-models.ts"));
-  const xkiro=transpile("lib/xkiro.ts").replace('"./story-analysis-models"','"./story-analysis-models.mjs"');
+  const vertexStory=transpile("lib/vertex-story.ts").replace('"./story-analysis-models"','"./story-analysis-models.mjs"');
+  fs.writeFileSync(path.join(tempDir,"vertex-story.mjs"),vertexStory);
+  const xkiro=transpile("lib/xkiro.ts")
+    .replace('"./story-analysis-models"','"./story-analysis-models.mjs"')
+    .replace('"./vertex-story"','"./vertex-story.mjs"');
   fs.writeFileSync(path.join(tempDir,"xkiro.mjs"),xkiro);
 
   const {normalizeMangaStructuredData}=await import(pathToFileURL(path.join(tempDir,"structured-normalize.mjs")).href);

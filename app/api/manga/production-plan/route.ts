@@ -4,7 +4,7 @@ import {analyzeMangaMaster} from "@/lib/manga-production/planner";
 import {planMangaPagesSafe} from "@/lib/manga-production/planner-safe";
 import {analyzeLongMangaMaster,shouldUseLongStoryAnalysis} from "@/lib/manga-production/long-story";
 import {MANGA_STYLE_PRESETS} from "@/lib/manga-production/types";
-import {STORY_ANALYSIS_MODELS,isStoryAnalysisModel,type StoryAnalysisModel} from "@/lib/story-analysis-models";
+import {STORY_ANALYSIS_MODELS,isStoryAnalysisModel,storyAnalysisProviderLabel,type StoryAnalysisModel} from "@/lib/story-analysis-models";
 import {XKiroRequestError} from "@/lib/xkiro";
 
 const Base=z.object({
@@ -54,19 +54,18 @@ export async function POST(request:Request){
   try{
     const parsed=Input.safeParse(await request.json());
     if(!parsed.success)return NextResponse.json({error:"Invalid manga production request",details:parsed.error.flatten()},{status:400});
-    // The body model remains allow-listed, while the selector cookie fixes the case
-    // where the top-level model selector changes after Manga Studio already hydrated.
     const analysisModel=liveSelectedModel(request,parsed.data.analysisModel);
+    const provider=storyAnalysisProviderLabel(analysisModel);
 
     if(parsed.data.action==="master"){
       const masterInput={...parsed.data,analysisModel};
-      const data=shouldUseLongStoryAnalysis(parsed.data.story)
+      const analyzed=shouldUseLongStoryAnalysis(parsed.data.story)
         ?await analyzeLongMangaMaster(masterInput)
         :await analyzeMangaMaster(masterInput);
-      return NextResponse.json({kind:"master",data});
+      return NextResponse.json({kind:"master",data:{...analyzed,provider}});
     }
 
-    const data=await planMangaPagesSafe({
+    const planned=await planMangaPagesSafe({
       analysisModel,
       stylePreset:parsed.data.stylePreset,
       storySummary:parsed.data.storySummary,
@@ -78,7 +77,7 @@ export async function POST(request:Request){
       locations:parsed.data.locations,
       props:parsed.data.props
     });
-    return NextResponse.json({kind:"pages",data});
+    return NextResponse.json({kind:"pages",data:{...planned,provider}});
   }catch(error){
     if(error instanceof XKiroRequestError){
       console.error("Manga production xKiro request failed",{code:error.code,status:error.status,message:error.message});
