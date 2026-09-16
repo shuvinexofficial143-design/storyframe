@@ -64,17 +64,6 @@ export function MangaPageProductionStudio(){
 
   const project=useMemo(()=>state.projects.find((item)=>item.id===state.activeProjectId)||state.projects[0],[state]);
   const chapter=useMemo(()=>project?.chapters.find((item)=>item.id===project.activeChapterId)||project?.chapters[0],[project]);
-
-  useEffect(()=>{
-    if(!hydrated||!chapter)return;
-    try{
-      const saved=localStorage.getItem(`manga-pacing-${chapter.id}`);
-      setPacingPreset(MANGA_PACING_PRESETS.includes(saved as MangaPacingPreset)?saved as MangaPacingPreset:"Balanced");
-    }catch{
-      setPacingPreset("Balanced");
-    }
-  },[hydrated,chapter?.id]);
-
   if(!project||!chapter)return <div className="p-8 text-zinc-400">Loading Manga Studio…</div>;
   const production=chapter.manga;
 
@@ -84,9 +73,7 @@ export function MangaPageProductionStudio(){
 
   const changePacing=(value:string)=>{
     if(!MANGA_PACING_PRESETS.includes(value as MangaPacingPreset))return;
-    const next=value as MangaPacingPreset;
-    setPacingPreset(next);
-    try{localStorage.setItem(`manga-pacing-${chapter.id}`,next)}catch{}
+    setPacingPreset(value as MangaPacingPreset);
   };
 
   const changeStyle=(value:string)=>{
