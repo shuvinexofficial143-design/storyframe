@@ -3,9 +3,11 @@ import {isVertexStoryAnalysisModel,vertexStoryModelId,type StoryAnalysisModel} f
 
 type ServiceAccount={project_id?:string;client_email:string;private_key:string;token_uri?:string};
 type VertexCompletionInput={model:StoryAnalysisModel;systemPrompt:string;userPrompt:string;maxTokens?:number;temperature?:number};
+type VertexPayload={candidates?:Array<{finishReason?:string;content?:{parts?:Array<{text?:unknown;thought?:unknown}>}}>};
 
 const GOOGLE_SCOPE="https://www.googleapis.com/auth/cloud-platform";
 const GOOGLE_TOKEN_URL="https://oauth2.googleapis.com/token";
+const GEMINI_31_PRO_MAX_OUTPUT_TOKENS=65536;
 let tokenCache:{accessToken:string;expiresAt:number}|null=null;
 
 function parseServiceAccount():ServiceAccount|null{
@@ -55,28 +57,87 @@ async function fetchWithTimeout(url:string,init:RequestInit){
   finally{clearTimeout(timer)}
 }
 
-function responseText(payload:unknown){
-  const data=payload as {candidates?:Array<{content?:{parts?:Array<{text?:unknown;thought?:unknown}>}}>};
-  const parts=data.candidates?.[0]?.content?.parts||[];
+function responseText(payload:VertexPayload){
+  const parts=payload.candidates?.[0]?.content?.parts||[];
   return parts.filter((part)=>part.thought!==true&&typeof part.text==="string").map((part)=>part.text as string).join("").trim();
 }
 
-function parseJsonObject(value:string){
-  const cleaned=value.replace(/^\uFEFF/,"").replace(/^```(?:json)?\s*/i,"").replace(/\s*```$/i,"").trim();
-  try{return JSON.parse(cleaned)}catch{}
-  const start=cleaned.indexOf("{");
-  const end=cleaned.lastIndexOf("}");
-  if(start>=0&&end>start){
-    const slice=cleaned.slice(start,end+1).replace(/,\s*([}\]])/g,"$1");
-    try{return JSON.parse(slice)}catch{}
+function repairCommonJson(value:string){
+  let escapedText="",inString=false,escaped=false;
+  for(const char of value){
+    if(inString){
+      if(escaped){escapedText+=char;escaped=false;continue}
+      if(char==="\\"){escapedText+=char;escaped=true;continue}
+      if(char==='"'){escapedText+=char;inString=false;continue}
+      if(char==="\n"){escapedText+="\\n";continue}
+      if(char==="\r"){escapedText+="\\r";continue}
+      if(char==="\t"){escapedText+="\\t";continue}
+      escapedText+=char;continue;
+    }
+    if(char==='"')inString=true;
+    escapedText+=char;
   }
+
+  let output="";inString=false;escaped=false;
+  for(let index=0;index<escapedText.length;index+=1){
+    const char=escapedText[index];
+    if(inString){output+=char;if(escaped){escaped=false;continue}if(char==="\\"){escaped=true;continue}if(char==='"')inString=false;continue}
+    if(char==='"'){inString=true;output+=char;continue}
+    if(char===","){
+      let next=index+1;while(next<escapedText.length&&/\s/.test(escapedText[next]))next+=1;
+      if(escapedText[next]==="}"||escapedText[next]==="]")continue;
+    }
+    output+=char;
+  }
+  return output;
+}
+
+function extractBalancedObject(value:string){
+  const start=value.indexOf("{");if(start<0)return undefined;
+  let depth=0,inString=false,escaped=false;
+  for(let index=start;index<value.length;index+=1){
+    const char=value[index];
+    if(inString){if(escaped){escaped=false;continue}if(char==="\\"){escaped=true;continue}if(char==='"')inString=false;continue}
+    if(char==='"'){inString=true;continue}
+    if(char==="{")depth+=1;
+    else if(char==="}"){depth-=1;if(depth===0)return value.slice(start,index+1)}
+  }
+  return undefined;
+}
+
+function closeIncompleteJson(value:string){
+  let output=value.trim();if(!output)return output;
+  const stack:string[]=[];let inString=false,escaped=false;
+  for(const char of output){
+    if(inString){if(escaped){escaped=false;continue}if(char==="\\"){escaped=true;continue}if(char==='"')inString=false;continue}
+    if(char==='"'){inString=true;continue}
+    if(char==="{"||char==="[")stack.push(char);
+    else if(char==="}"||char==="]"){
+      const expected=char==="}"?"{":"[";
+      if(stack.at(-1)===expected)stack.pop();
+    }
+  }
+  if(inString){if(escaped&&output.endsWith("\\"))output=output.slice(0,-1);output+='"'}
+  output=output.trimEnd().replace(/,\s*$/,"");
+  if(/:\s*$/.test(output))output+="null";
+  while(stack.length)output+=stack.pop()==="{"?"}":"]";
+  return output;
+}
+
+export function parseVertexJsonObject(value:string){
+  const cleaned=value.replace(/^\uFEFF/,"").replace(/^```(?:json)?\s*/i,"").replace(/\s*```$/i,"").trim();
+  const balanced=extractBalancedObject(cleaned);
+  const start=cleaned.indexOf("{");
+  const raw=balanced??(start>=0?cleaned.slice(start):cleaned);
+  const repaired=repairCommonJson(raw);
+  const candidates=[cleaned,raw,repaired,closeIncompleteJson(repaired)].filter((item,index,all)=>item&&all.indexOf(item)===index);
+  for(const candidate of candidates){try{return JSON.parse(candidate)}catch{}}
   throw new Error("Vertex Gemini returned malformed JSON.");
 }
 
 export function hasVertexStoryAnalysis(){return Boolean(projectId()&&(parseServiceAccount()||apiKey()))}
 
-export async function vertexStoryJsonCompletion(input:VertexCompletionInput){
-  if(!isVertexStoryAnalysisModel(input.model))throw new Error("Unsupported Vertex story analysis model.");
+async function requestOnce(input:VertexCompletionInput,userPrompt:string,maxOutputTokens:number,thinkingLevel:"HIGH"|"MEDIUM"){
   const project=projectId();
   const account=parseServiceAccount();
   const key=apiKey();
@@ -90,12 +151,12 @@ export async function vertexStoryJsonCompletion(input:VertexCompletionInput){
 
   const body={
     systemInstruction:{parts:[{text:input.systemPrompt}]},
-    contents:[{role:"user",parts:[{text:input.userPrompt}]}],
+    contents:[{role:"user",parts:[{text:userPrompt}]}],
     generationConfig:{
       temperature:input.temperature??0.12,
-      maxOutputTokens:Math.max(1024,Math.min(input.maxTokens??14000,32768)),
+      maxOutputTokens:Math.max(1024,Math.min(maxOutputTokens,GEMINI_31_PRO_MAX_OUTPUT_TOKENS)),
       responseMimeType:"application/json",
-      thinkingConfig:{thinkingLevel:"HIGH"}
+      thinkingConfig:{thinkingLevel}
     }
   };
 
@@ -106,9 +167,33 @@ export async function vertexStoryJsonCompletion(input:VertexCompletionInput){
     try{const parsed=JSON.parse(raw) as {error?:{message?:string}};message=parsed.error?.message||message}catch{}
     throw new Error(`Vertex Gemini story request failed (${response.status})${message?`: ${message}`:""}`);
   }
-  let payload:unknown;
-  try{payload=JSON.parse(raw)}catch{throw new Error("Vertex Gemini returned an invalid API response.")}
+  let payload:VertexPayload;
+  try{payload=JSON.parse(raw) as VertexPayload}catch{throw new Error("Vertex Gemini returned an invalid API response.")}
   const text=responseText(payload);
   if(!text)throw new Error("Vertex Gemini returned an empty story analysis response.");
-  return {text,json:parseJsonObject(text)};
+  return {text,finishReason:payload.candidates?.[0]?.finishReason||""};
+}
+
+export async function vertexStoryJsonCompletion(input:VertexCompletionInput){
+  if(!isVertexStoryAnalysisModel(input.model))throw new Error("Unsupported Vertex story analysis model.");
+
+  // Page planning is mostly deterministic formatting, so MEDIUM thinking is faster and leaves
+  // more output budget for the large JSON. Master/global story analysis keeps HIGH reasoning.
+  const pageLike=/Page Planner|Beat Director/i.test(input.systemPrompt);
+  const firstThinking=pageLike?"MEDIUM" as const:"HIGH" as const;
+  const requested=input.maxTokens??14000;
+  const firstBudget=Math.max(requested,32768);
+  const first=await requestOnce(input,input.userPrompt,firstBudget,firstThinking);
+
+  if(first.finishReason!=="MAX_TOKENS"){
+    try{return {text:first.text,json:parseVertexJsonObject(first.text)}}catch(error){
+      if(!(error instanceof Error)||!error.message.includes("malformed JSON"))throw error;
+    }
+  }
+
+  console.warn("Vertex Gemini returned truncated or malformed structured output; retrying with full output budget.",{finishReason:first.finishReason||"parse_error"});
+  const retryPrompt=`${input.userPrompt}\n\nSTRICT JSON RECOVERY RETRY: Return exactly ONE COMPLETE valid JSON object and nothing else. Do not use markdown fences. Preserve every requested story beat and its order. Keep descriptions concise enough to finish the entire object. Escape quotes and line breaks inside strings. Do not use trailing commas. Close every array and object. Never stop mid-JSON.`;
+  const retry=await requestOnce({...input,temperature:Math.min(input.temperature??0.12,0.03)},retryPrompt,GEMINI_31_PRO_MAX_OUTPUT_TOKENS,"MEDIUM");
+  if(retry.finishReason==="MAX_TOKENS")throw new Error("Vertex Gemini structured output exceeded the full 65K output budget. StoryFrame should split this planning step into smaller chunks.");
+  return {text:retry.text,json:parseVertexJsonObject(retry.text)};
 }
