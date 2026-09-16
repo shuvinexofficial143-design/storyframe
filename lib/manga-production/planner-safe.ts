@@ -16,7 +16,7 @@ function baseInput(input:AdaptivePagePlannerInput):PagePlannerInput{
   return rest;
 }
 
-/** Legacy fallback splitter kept for non-cinematic pacing and regression compatibility. */
+/** Legacy safe splitter kept for compatibility and targeted tests. */
 export function partitionBeatCounts(total:number){
   if(total<3)return [];
   const threes=Math.floor(total/3);
@@ -80,36 +80,18 @@ async function planSequentialChunks(input:AdaptivePagePlannerInput,counts:number
 }
 
 /**
- * Cinematic is the StoryFrame default: page count is derived from beat count,
- * not fixed to 6/12 pages. The policy targets about 3-4 panels/page and plans
- * two pages at a time (normally 6-8 beats) so continuity state is carried
- * forward without making one model call per panel/page.
- *
- * Other pacing modes keep the existing fast bulk path and deterministic
- * semantic-error fallback.
+ * Every beat-detail level uses sequential continuity chunks. Page count is
+ * derived from the selected density instead of a fixed chapter size. Each
+ * chunk normally spans about two pages, then the exact end state is carried
+ * into the next chunk so Low, Standard and Highest all preserve continuity.
  */
 export async function planMangaPagesSafe(input:AdaptivePagePlannerInput):Promise<MangaPagePlan>{
   const remaining=input.beats.length-input.startBeatIndex;
   const clean=baseInput(input);
   if(remaining<3)return planMangaPagesBase(clean);
 
-  const pacing=input.pacingPreset||"Cinematic";
-  if(pacing==="Cinematic"){
-    const counts=partitionPlanningChunkCounts(remaining,pacing);
-    if(!counts.length)throw new Error("Manga page planner could not derive adaptive cinematic page groups.");
-    return planSequentialChunks(input,counts);
-  }
-
-  try{
-    const fast=await planMangaPagesBase(clean);
-    const left=input.beats.length-fast.nextBeatIndex;
-    if(left!==1&&left!==2)return fast;
-  }catch(error){
-    if(!isSemanticPlannerError(error))throw error;
-  }
-
-  const remainingBeats=input.beats.slice(input.startBeatIndex);
-  const counts=partitionBeatCounts(remainingBeats.length);
-  if(!counts.length)throw new Error("Manga page planner could not split the remaining story beats into valid 3-5 panel pages.");
+  const pacing=input.pacingPreset||"Balanced";
+  const counts=partitionPlanningChunkCounts(remaining,pacing);
+  if(!counts.length)throw new Error("Manga page planner could not derive adaptive continuity page groups.");
   return planSequentialChunks(input,counts);
 }
