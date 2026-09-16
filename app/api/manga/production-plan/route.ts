@@ -1,6 +1,7 @@
 import {NextResponse} from "next/server";
 import {z} from "zod";
-import {analyzeMangaMaster,planMangaPages} from "@/lib/manga-production/planner";
+import {analyzeMangaMaster} from "@/lib/manga-production/planner";
+import {planMangaPagesSafe} from "@/lib/manga-production/planner-safe";
 import {analyzeLongMangaMaster,shouldUseLongStoryAnalysis} from "@/lib/manga-production/long-story";
 import {MANGA_STYLE_PRESETS} from "@/lib/manga-production/types";
 import {STORY_ANALYSIS_MODELS,isStoryAnalysisModel,type StoryAnalysisModel} from "@/lib/story-analysis-models";
@@ -65,7 +66,7 @@ export async function POST(request:Request){
       return NextResponse.json({kind:"master",data});
     }
 
-    const data=await planMangaPages({
+    const data=await planMangaPagesSafe({
       analysisModel,
       stylePreset:parsed.data.stylePreset,
       storySummary:parsed.data.storySummary,
