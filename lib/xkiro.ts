@@ -1,8 +1,9 @@
-import {DEFAULT_STORY_ANALYSIS_MODEL,STORY_ANALYSIS_MODELS,isStoryAnalysisModel,type StoryAnalysisModel} from "./story-analysis-models";
+import {DEFAULT_STORY_ANALYSIS_MODEL,isStoryAnalysisModel,isVertexStoryAnalysisModel,storyAnalysisProviderLabel,type StoryAnalysisModel} from "./story-analysis-models";
+import {hasVertexStoryAnalysis,vertexStoryJsonCompletion} from "./vertex-story";
 
-export const XKIRO_STORY_MODELS=STORY_ANALYSIS_MODELS;
-export type XKiroStoryModel=StoryAnalysisModel;
-export const DEFAULT_XKIRO_STORY_MODEL=DEFAULT_STORY_ANALYSIS_MODEL;
+export const XKIRO_STORY_MODELS=["mistralai/mistral-medium-3.5","mistralai/mistral-large-2512"] as const;
+export type XKiroStoryModel=(typeof XKIRO_STORY_MODELS)[number];
+export const DEFAULT_XKIRO_STORY_MODEL:XKiroStoryModel="mistralai/mistral-medium-3.5";
 
 export type XKiroFailureCode="not_configured"|"invalid_model"|"unauthorized"|"rate_limited"|"timeout"|"server_error"|"invalid_response"|"empty_response"|"request_failed";
 
@@ -15,7 +16,8 @@ const getApiKey=()=>process.env.XKIRO_API_KEY?.trim()||"";
 const getTimeout=()=>{const value=Number(process.env.XKIRO_ANALYZE_TIMEOUT_MS||90000);return Number.isFinite(value)&&value>0?value:90000};
 
 export function hasXKiro(){return Boolean(getApiKey())}
-export function isXKiroStoryModel(value:unknown):value is XKiroStoryModel{return isStoryAnalysisModel(value)}
+export function hasStoryAnalysisModel(model:StoryAnalysisModel){return isVertexStoryAnalysisModel(model)?hasVertexStoryAnalysis():hasXKiro()}
+export function isXKiroStoryModel(value:unknown):value is XKiroStoryModel{return typeof value==="string"&&(XKIRO_STORY_MODELS as readonly string[]).includes(value)}
 
 async function fetchWithTimeout(input:string|URL,init:RequestInit,timeoutMs:number){const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),timeoutMs);try{return await fetch(input,{...init,signal:controller.signal})}catch(error){if(error instanceof Error&&error.name==="AbortError")throw new XKiroRequestError(`xKiro request timed out after ${Math.round(timeoutMs/1000)} seconds.`,"timeout",504);throw new XKiroRequestError("xKiro request could not be completed.","request_failed",502)}finally{clearTimeout(timer)}}
 
@@ -118,7 +120,9 @@ async function requestJsonCompletion(input:{model:StoryAnalysisModel;systemPromp
 }
 
 export async function xkiroJsonCompletion(input:{model:StoryAnalysisModel;systemPrompt:string;userPrompt:string;maxTokens?:number;temperature?:number}){
-  const key=getApiKey();if(!key)throw new XKiroRequestError("XKIRO_API_KEY is not configured.","not_configured",503);if(!isStoryAnalysisModel(input.model))throw new XKiroRequestError("Unsupported xKiro story model.","invalid_model",400);
+  if(!isStoryAnalysisModel(input.model))throw new XKiroRequestError("Unsupported story model.","invalid_model",400);
+  if(isVertexStoryAnalysisModel(input.model))return vertexStoryJsonCompletion(input);
+  const key=getApiKey();if(!key)throw new XKiroRequestError("XKIRO_API_KEY is not configured.","not_configured",503);
   const maxTokens=input.maxTokens??14000;const temperature=input.temperature??0.15;
   try{return await requestJsonCompletion({model:input.model,systemPrompt:input.systemPrompt,userPrompt:input.userPrompt,maxTokens,temperature})}
   catch(error){
@@ -130,7 +134,8 @@ export async function xkiroJsonCompletion(input:{model:StoryAnalysisModel;system
 }
 
 export async function xkiroVisionJsonCompletion(input:{model:StoryAnalysisModel;systemPrompt:string;userPrompt:string;images:string[];maxTokens?:number;temperature?:number}){
-  const key=getApiKey();if(!key)throw new XKiroRequestError("XKIRO_API_KEY is not configured.","not_configured",503);if(!isStoryAnalysisModel(input.model))throw new XKiroRequestError("Unsupported xKiro vision model.","invalid_model",400);
+  if(isVertexStoryAnalysisModel(input.model))throw new XKiroRequestError("Gemini 3.1 Pro is connected for story analysis; visual QA still uses an xKiro vision model.","invalid_model",400);
+  const key=getApiKey();if(!key)throw new XKiroRequestError("XKIRO_API_KEY is not configured.","not_configured",503);if(!isXKiroStoryModel(input.model))throw new XKiroRequestError("Unsupported xKiro vision model.","invalid_model",400);
   const images=input.images.filter(Boolean).slice(0,3);
   if(!images.length)throw new XKiroRequestError("Panel QA requires at least one image.","invalid_response",400);
   const content=[...images.map((url)=>({type:"image_url" as const,image_url:{url}})),{type:"text" as const,text:input.userPrompt}];
@@ -138,4 +143,4 @@ export async function xkiroVisionJsonCompletion(input:{model:StoryAnalysisModel;
   return parseChatResponse(response);
 }
 
-export async function xkiroAnalyzeStory(input:{story:string;visualStyle:string;model:XKiroStoryModel}){const words=input.story.trim().split(/\s+/).filter(Boolean).length;const targetScenes=Math.min(60,Math.max(4,Math.ceil(words/60)));const system=`You are StoryFrame AI, an expert visual story director and storyboard prompt writer. Return STRICT valid JSON only, never markdown or commentary. Preserve source chronology and facts; do not invent major plot events. Output exactly these top-level keys: summary, characters, locations, scenes. characters[] fields: name, role, appearance, outfit, consistencyNotes. locations[] fields: name, architecture, lighting, continuity. scenes[] fields: sourceText, description, characterNames, locationName, cameraShot, cameraAngle, duration, imagePrompt, negativePrompt, continuityNotes. Break the story into meaningful visual beats. Character descriptions must be reusable and consistent. Location descriptions must preserve reusable layout, architecture, props and lighting. imagePrompt must always be in English and standalone usable. Never request captions, subtitles, logos, watermarks or speech bubbles.`;const user=`Visual style: ${input.visualStyle}\nScene budget: approximately ${targetScenes}; actual story beats are more important, maximum 60 scenes.\n\nStory:\n${input.story}`;const result=await xkiroJsonCompletion({model:input.model,systemPrompt:system,userPrompt:user,temperature:0.15,maxTokens:14000});return {raw:result.text,json:result.json,provider:"xkiro",model:input.model}}
+export async function xkiroAnalyzeStory(input:{story:string;visualStyle:string;model:StoryAnalysisModel}){const words=input.story.trim().split(/\s+/).filter(Boolean).length;const targetScenes=Math.min(60,Math.max(4,Math.ceil(words/60)));const system=`You are StoryFrame AI, an expert visual story director and storyboard prompt writer. Return STRICT valid JSON only, never markdown or commentary. Preserve source chronology and facts; do not invent major plot events. Output exactly these top-level keys: summary, characters, locations, scenes. characters[] fields: name, role, appearance, outfit, consistencyNotes. locations[] fields: name, architecture, lighting, continuity. scenes[] fields: sourceText, description, characterNames, locationName, cameraShot, cameraAngle, duration, imagePrompt, negativePrompt, continuityNotes. Break the story into meaningful visual beats. Character descriptions must be reusable and consistent. Location descriptions must preserve reusable layout, architecture, props and lighting. imagePrompt must always be in English and standalone usable. Never request captions, subtitles, logos, watermarks or speech bubbles.`;const user=`Visual style: ${input.visualStyle}\nScene budget: approximately ${targetScenes}; actual story beats are more important, maximum 60 scenes.\n\nStory:\n${input.story}`;const result=await xkiroJsonCompletion({model:input.model,systemPrompt:system,userPrompt:user,temperature:0.15,maxTokens:14000});return {raw:result.text,json:result.json,provider:isVertexStoryAnalysisModel(input.model)?"vertex-ai":"xkiro",providerLabel:storyAnalysisProviderLabel(input.model),model:input.model}}
