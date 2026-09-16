@@ -100,15 +100,21 @@ try{
   const fast=estimateAdaptivePacing(syntheticStory,"Fast");
   const balanced=estimateAdaptivePacing(syntheticStory,"Balanced");
   const cinematic=estimateAdaptivePacing(syntheticStory,"Cinematic");
-  assert.equal(cinematic.targetBeats,40);
+  assert.equal(fast.targetBeats,23);
+  assert.equal(balanced.targetBeats,40);
+  assert.equal(cinematic.targetBeats,80);
   assert.ok(cinematic.targetBeats>balanced.targetBeats&&balanced.targetBeats>fast.targetBeats);
-  const panelCounts=partitionPagePanelCounts(40,"Cinematic");
+  assert.equal(balanced.maxBeats,50);
+  const panelCounts=partitionPagePanelCounts(40,"Balanced");
   assert.equal(panelCounts.length,12);
   assert.equal(panelCounts.reduce((sum,value)=>sum+value,0),40);
   assert.ok(panelCounts.every((value)=>value>=3&&value<=5));
-  const planningChunks=partitionPlanningChunkCounts(40,"Cinematic");
+  const planningChunks=partitionPlanningChunkCounts(40,"Balanced");
   assert.equal(planningChunks.reduce((sum,value)=>sum+value,0),40);
   assert.ok(planningChunks.every((value)=>value>=6&&value<=8));
+  const highChunks=partitionPlanningChunkCounts(80,"Cinematic");
+  assert.equal(highChunks.reduce((sum,value)=>sum+value,0),80);
+  assert.ok(highChunks.every((value)=>value>=6&&value<=8));
 
   assert.equal(isRetryableVertexStoryFailure(new Error("Vertex Gemini story request failed (429): Resource exhausted.")),true);
   assert.equal(isRetryableVertexStoryFailure(new Error("Vertex Gemini story request failed (400): bad request")),false);
@@ -128,7 +134,7 @@ try{
   assert.equal(fallbackResult.fallbackUsed,true);
   if(oldKey===undefined)delete process.env.XKIRO_API_KEY;else process.env.XKIRO_API_KEY=oldKey;
 
-  console.log("Manga structured-output, adaptive-pacing and Vertex-fallback regression checks passed.");
+  console.log("Manga structured-output, beat-detail pacing and Vertex-fallback regression checks passed.");
 }finally{
   fs.rmSync(tempDir,{recursive:true,force:true});
 }
