@@ -59,9 +59,11 @@ export function partitionPagePanelCounts(totalBeats:number,preset:MangaPacingPre
   return counts;
 }
 
+/**
+ * Planning requests intentionally map 1:1 to manga pages. The browser asks
+ * for the next page only after the previous request finishes, which prevents
+ * a chapter build from bursting many Gemini requests at once.
+ */
 export function partitionPlanningChunkCounts(totalBeats:number,preset:MangaPacingPreset="Balanced"){
-  const pages=partitionPagePanelCounts(totalBeats,preset);
-  const chunks:number[]=[];
-  for(let index=0;index<pages.length;index+=2)chunks.push(pages[index]+(pages[index+1]||0));
-  return chunks;
+  return partitionPagePanelCounts(totalBeats,preset);
 }

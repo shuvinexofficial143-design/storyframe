@@ -110,31 +110,49 @@ try{
   assert.equal(panelCounts.reduce((sum,value)=>sum+value,0),40);
   assert.ok(panelCounts.every((value)=>value>=3&&value<=5));
   const planningChunks=partitionPlanningChunkCounts(40,"Balanced");
-  assert.equal(planningChunks.reduce((sum,value)=>sum+value,0),40);
-  assert.ok(planningChunks.every((value)=>value>=6&&value<=8));
+  assert.deepEqual(planningChunks,panelCounts);
+  assert.equal(planningChunks.length,12);
+  assert.ok(planningChunks.every((value)=>value>=3&&value<=5));
   const highChunks=partitionPlanningChunkCounts(80,"Cinematic");
   assert.equal(highChunks.reduce((sum,value)=>sum+value,0),80);
-  assert.ok(highChunks.every((value)=>value>=3&&value<=8));
+  assert.ok(highChunks.every((value)=>value>=3&&value<=5));
 
   assert.equal(isRetryableVertexStoryFailure(new Error("Vertex Gemini story request failed (429): Resource exhausted.")),true);
   assert.equal(isRetryableVertexStoryFailure(new Error("Vertex Gemini story request failed (400): bad request")),false);
   const oldKey=process.env.XKIRO_API_KEY;
   process.env.XKIRO_API_KEY="regression-test-key";
   const attempted=[];
+  const retryDelays=[];
   const fallbackResult=await withStoryModelFallback({
     model:"google/gemini-3.1-pro-preview",
+    sleep:async(ms)=>{retryDelays.push(ms)},
     run:async(model)=>{
       attempted.push(model);
       if(model==="google/gemini-3.1-pro-preview")throw new Error("Vertex Gemini story request failed (429): Resource exhausted.");
       return "planned";
     }
   });
-  assert.deepEqual(attempted,["google/gemini-3.1-pro-preview","mistralai/mistral-large-2512"]);
+  assert.deepEqual(retryDelays,[2000,5000]);
+  assert.deepEqual(attempted,["google/gemini-3.1-pro-preview","google/gemini-3.1-pro-preview","google/gemini-3.1-pro-preview","mistralai/mistral-large-2512"]);
   assert.equal(fallbackResult.data,"planned");
   assert.equal(fallbackResult.fallbackUsed,true);
+
+  const recoveredAttempts=[];
+  const recovered=await withStoryModelFallback({
+    model:"google/gemini-3.1-pro-preview",
+    sleep:async()=>{},
+    run:async(model)=>{
+      recoveredAttempts.push(model);
+      if(recoveredAttempts.length===1)throw new Error("Vertex Gemini story request failed (429): Resource exhausted.");
+      return "recovered-on-gemini";
+    }
+  });
+  assert.deepEqual(recoveredAttempts,["google/gemini-3.1-pro-preview","google/gemini-3.1-pro-preview"]);
+  assert.equal(recovered.data,"recovered-on-gemini");
+  assert.equal(recovered.fallbackUsed,false);
   if(oldKey===undefined)delete process.env.XKIRO_API_KEY;else process.env.XKIRO_API_KEY=oldKey;
 
-  console.log("Manga structured-output, beat-detail pacing and Vertex-fallback regression checks passed.");
+  console.log("Manga structured-output, one-page-at-a-time pacing and Vertex-backoff regression checks passed.");
 }finally{
   fs.rmSync(tempDir,{recursive:true,force:true});
 }

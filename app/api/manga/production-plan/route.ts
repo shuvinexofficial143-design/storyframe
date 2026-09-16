@@ -6,9 +6,13 @@ import {analyzeLongMangaMaster,shouldUseLongStoryAnalysis} from "@/lib/manga-pro
 import {refineMangaMasterForPacing} from "@/lib/manga-production/adaptive-master";
 import {MANGA_PACING_PRESETS} from "@/lib/manga-production/pacing-policy";
 import {MANGA_STYLE_PRESETS} from "@/lib/manga-production/types";
-import {STORY_ANALYSIS_MODELS,isStoryAnalysisModel,storyAnalysisProviderLabel,type StoryAnalysisModel} from "@/lib/story-analysis-models";
+import {STORY_ANALYSIS_MODELS,isStoryAnalysisModel,isVertexStoryAnalysisModel,storyAnalysisProviderLabel,type StoryAnalysisModel} from "@/lib/story-analysis-models";
 import {withStoryModelFallback} from "@/lib/story-model-fallback";
 import {XKiroRequestError} from "@/lib/xkiro";
+
+export const maxDuration=120;
+
+const DEFAULT_GEMINI_PAGE_PLANNING_COOLDOWN_MS=12_000;
 
 const Base=z.object({
   action:z.enum(["master","pages"]),
@@ -59,6 +63,17 @@ function providerLabel(model:StoryAnalysisModel,fallbackUsed:boolean,pacing:stri
   return `${base}${fallbackUsed?" · automatic fallback from Gemini 3.1 Pro":""} · adaptive ${pacing.toLowerCase()} pacing`;
 }
 
+function pagePlanningCooldownMs(){
+  const configured=Number(process.env.GEMINI_PAGE_PLANNING_COOLDOWN_MS||DEFAULT_GEMINI_PAGE_PLANNING_COOLDOWN_MS);
+  if(!Number.isFinite(configured))return DEFAULT_GEMINI_PAGE_PLANNING_COOLDOWN_MS;
+  return Math.max(0,Math.min(60_000,Math.round(configured)));
+}
+
+async function wait(ms:number){
+  if(ms<=0)return;
+  await new Promise<void>((resolve)=>setTimeout(resolve,ms));
+}
+
 export async function POST(request:Request){
   try{
     const parsed=Input.safeParse(await request.json());
@@ -82,6 +97,11 @@ export async function POST(request:Request){
     }
 
     const pagesData=data;
+    // Gemini page planning is deliberately paced. The browser already waits for
+    // each response before asking for the next page, so this cooldown prevents
+    // a chapter build from creating a request burst against Vertex AI quotas.
+    if(isVertexStoryAnalysisModel(analysisModel))await wait(pagePlanningCooldownMs());
+
     const result=await withStoryModelFallback({
       model:analysisModel,
       run:(model)=>planMangaPagesSafe({
