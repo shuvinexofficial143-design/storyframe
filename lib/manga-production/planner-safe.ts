@@ -32,9 +32,13 @@ export function partitionBeatCounts(total:number){
 
 async function planExactGroup(input:PagePlannerInput,maxAttempts=3){
   let lastError:unknown;
+  const exactInput:PagePlannerInput={
+    ...input,
+    storySummary:`${input.storySummary}\n\nPLANNER CONTROL: This is an exact continuity chunk containing ${input.beats.length} supplied beats. Consume ALL supplied beat IDs in order in this response. Use enough 3-5 panel pages to cover every supplied beat exactly once; do not stop after the first page. The full supplied list is the required contiguous prefix.`
+  };
   for(let attempt=1;attempt<=maxAttempts;attempt+=1){
     try{
-      const result=await planMangaPagesBase(input);
+      const result=await planMangaPagesBase(exactInput);
       if(result.nextBeatIndex===input.beats.length)return result;
       lastError=new Error(`Manga page planner consumed ${result.nextBeatIndex}/${input.beats.length} beats in an exact continuity group.`);
     }catch(error){
