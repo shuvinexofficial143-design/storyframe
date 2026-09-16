@@ -3,10 +3,12 @@ export type MangaPacingPreset=(typeof MANGA_PACING_PRESETS)[number];
 
 const clamp=(value:number,min:number,max:number)=>Math.max(min,Math.min(max,value));
 
-const CONFIG:Record<MangaPacingPreset,{wordsPerBeat:number;momentMultiplier:number;minimumBeats:number;averagePanelsPerPage:number}>={
-  Fast:{wordsPerBeat:17,momentMultiplier:1.15,minimumBeats:6,averagePanelsPerPage:4.65},
-  Balanced:{wordsPerBeat:12,momentMultiplier:1.45,minimumBeats:8,averagePanelsPerPage:4},
-  Cinematic:{wordsPerBeat:8,momentMultiplier:1.8,minimumBeats:10,averagePanelsPerPage:3.4}
+type PacingConfig={wordsPerBeat:number;momentMultiplier:number;minimumBeats:number;averagePanelsPerPage:number;minFactor:number;maxFactor:number};
+
+const CONFIG:Record<MangaPacingPreset,PacingConfig>={
+  Fast:{wordsPerBeat:14,momentMultiplier:1.1,minimumBeats:6,averagePanelsPerPage:4.2,minFactor:.8,maxFactor:1.25},
+  Balanced:{wordsPerBeat:8,momentMultiplier:1.65,minimumBeats:10,averagePanelsPerPage:3.4,minFactor:.85,maxFactor:1.25},
+  Cinematic:{wordsPerBeat:4,momentMultiplier:2.8,minimumBeats:14,averagePanelsPerPage:3.5,minFactor:.8,maxFactor:1.2}
 };
 
 function visualMomentCount(story:string){
@@ -18,15 +20,15 @@ function visualMomentCount(story:string){
   return Math.max(1,sentenceMoments+Math.ceil(dialogueMoments*.5)+explicitEffects);
 }
 
-export function estimateAdaptivePacing(story:string,preset:MangaPacingPreset="Cinematic"){
+export function estimateAdaptivePacing(story:string,preset:MangaPacingPreset="Balanced"){
   const config=CONFIG[preset];
   const words=story.trim().split(/\s+/).filter(Boolean).length;
   const moments=visualMomentCount(story);
   const wordTarget=Math.ceil(words/config.wordsPerBeat);
   const momentTarget=Math.ceil(moments*config.momentMultiplier);
   const targetBeats=clamp(Math.max(config.minimumBeats,wordTarget,momentTarget),4,300);
-  const minBeats=clamp(Math.floor(targetBeats*.88),4,300);
-  const maxBeats=clamp(Math.ceil(targetBeats*1.14),minBeats,300);
+  const minBeats=clamp(Math.floor(targetBeats*config.minFactor),4,300);
+  const maxBeats=clamp(Math.ceil(targetBeats*config.maxFactor),minBeats,300);
   const targetPages=clamp(Math.round(targetBeats/config.averagePanelsPerPage),1,100);
   const minPages=Math.max(1,Math.ceil(minBeats/5));
   const maxPages=Math.max(minPages,Math.ceil(maxBeats/3));
@@ -36,14 +38,14 @@ export function estimateAdaptivePacing(story:string,preset:MangaPacingPreset="Ci
 export function pacingPrompt(preset:MangaPacingPreset,story:string){
   const estimate=estimateAdaptivePacing(story,preset);
   const detail=preset==="Cinematic"
-    ?"Preserve setup, action, reaction, impact and aftermath as separate visual beats whenever the source supports them. Give reveals, emotional reactions, object inserts and explicit transitions room to breathe."
+    ?"HIGHEST beat detail. Separate establishing details, setup, action, reaction, impact, aftermath, reveals, object inserts and explicit transitions whenever the source supports them. Do not create filler or alternate camera-only duplicates of the same unchanged moment."
     :preset==="Balanced"
-      ?"Keep all meaningful actions and reactions separate, but combine only minor atmospheric moments when doing so does not hide a visible state change."
-      :"Keep the full chronology and important reactions, while combining minor atmosphere or repeated motion when that does not remove story information.";
+      ?"STANDARD beat detail. Keep meaningful actions, reactions, reveals and state changes separate, while combining tiny camera-only or atmospheric micro-moments that can naturally share one manga panel."
+      :"LOW beat detail. Preserve the full chronology, important actions, reactions, dialogue turns and transitions, but combine minor atmosphere, repeated motion and small inserts when no important story state is lost.";
   return `PACING: ${preset}. Adaptive guidance for this chapter is roughly ${estimate.minBeats}-${estimate.maxBeats} visual beats (center ${estimate.targetBeats}), which is approximately ${estimate.minPages}-${estimate.maxPages} pages depending on panel rhythm. This is NOT a fixed quota: shorter/simple chapters may need fewer and longer/denser chapters may need more, up to the chapter safety limit. Never invent filler just to hit a number. ${detail}`;
 }
 
-export function partitionPagePanelCounts(totalBeats:number,preset:MangaPacingPreset="Cinematic"){
+export function partitionPagePanelCounts(totalBeats:number,preset:MangaPacingPreset="Balanced"){
   if(totalBeats<=0)return [];
   if(totalBeats<3)return [totalBeats];
   const average=CONFIG[preset].averagePanelsPerPage;
@@ -57,7 +59,7 @@ export function partitionPagePanelCounts(totalBeats:number,preset:MangaPacingPre
   return counts;
 }
 
-export function partitionPlanningChunkCounts(totalBeats:number,preset:MangaPacingPreset="Cinematic"){
+export function partitionPlanningChunkCounts(totalBeats:number,preset:MangaPacingPreset="Balanced"){
   const pages=partitionPagePanelCounts(totalBeats,preset);
   const chunks:number[]=[];
   for(let index=0;index<pages.length;index+=2)chunks.push(pages[index]+(pages[index+1]||0));

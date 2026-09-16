@@ -14,7 +14,7 @@ const Base=z.object({
   action:z.enum(["master","pages"]),
   analysisModel:z.enum(STORY_ANALYSIS_MODELS),
   stylePreset:z.enum(MANGA_STYLE_PRESETS),
-  pacingPreset:z.enum(MANGA_PACING_PRESETS).default("Cinematic")
+  pacingPreset:z.enum(MANGA_PACING_PRESETS).default("Balanced")
 });
 
 const Master=Base.extend({

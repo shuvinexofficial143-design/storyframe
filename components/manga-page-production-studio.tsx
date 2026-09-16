@@ -11,6 +11,7 @@ import {composeGeneratedMangaPage} from "@/lib/manga-production/full-page-compos
 import {compileMangaPagePrompt} from "@/lib/manga-production/page-prompt-compiler";
 import {mergeMangaMasterIntoProject} from "@/lib/manga-production/project-bridge";
 import {calculatePlannedCoverage} from "@/lib/manga-production/validators";
+import {MANGA_PACING_PRESETS,type MangaPacingPreset} from "@/lib/manga-production/pacing-policy";
 import {MANGA_STYLE_PRESETS,type MangaChapterProduction,type MangaMasterAnalysis,type MangaPage,type MangaPagePlan,type MangaStylePreset} from "@/lib/manga-production/types";
 import {downloadDataUrl} from "@/lib/manga-production/composer";
 
@@ -27,6 +28,8 @@ type PagesResponse={kind:"pages";data:MangaPagePlan};
 type Tab="story"|"characters"|"locations"|"script"|"pages"|"export";
 type ReferenceView="primary"|"full-body"|"three-quarter"|"side"|"sheet";
 
+const beatDetailLabel=(preset:MangaPacingPreset)=>preset==="Fast"?"Low":preset==="Balanced"?"Standard":"Highest";
+
 export function MangaPageProductionStudio(){
   const [state,setState]=useState<MangaStudioState>(()=>{const p=createProject("My Manga Project");return {activeProjectId:p.id,projects:[p]}});
   const stateRef=useRef(state);
@@ -36,6 +39,7 @@ export function MangaPageProductionStudio(){
   const [progress,setProgress]=useState("");
   const [notice,setNotice]=useState("");
   const [error,setError]=useState("");
+  const [pacingPreset,setPacingPreset]=useState<MangaPacingPreset>("Balanced");
 
   const applyState=(fn:(current:MangaStudioState)=>MangaStudioState)=>setState((current)=>{
     const next=fn(current);
@@ -66,6 +70,11 @@ export function MangaPageProductionStudio(){
   const updateProject=(fn:(project:MangaProject)=>MangaProject)=>applyState((current)=>mutateProject(current,project.id,fn));
   const updateChapter=(fn:(chapter:MangaChapter)=>MangaChapter)=>updateProject((current)=>({...current,updatedAt:now(),chapters:current.chapters.map((item)=>item.id===chapter.id?fn(item):item)}));
   const setStory=(story:string)=>updateChapter((item)=>({...item,story,updatedAt:now()}));
+
+  const changePacing=(value:string)=>{
+    if(!MANGA_PACING_PRESETS.includes(value as MangaPacingPreset))return;
+    setPacingPreset(value as MangaPacingPreset);
+  };
 
   const changeStyle=(value:string)=>{
     if(!MANGA_STYLE_PRESETS.includes(value as MangaStylePreset))return;
@@ -100,6 +109,7 @@ export function MangaPageProductionStudio(){
         action:"pages",
         analysisModel:currentProject.analysisModel,
         stylePreset:currentProduction.stylePreset,
+        pacingPreset:currentProduction.pacingPreset||pacingPreset,
         storySummary:currentProduction.storySummary,
         beats:currentProduction.beats,
         startBeatIndex,
@@ -149,12 +159,12 @@ export function MangaPageProductionStudio(){
 
   const buildManga=async()=>{
     if(chapter.story.trim().length<20){setError("पहले पूरी story paste करो।");return}
-    setBusy("master");setProgress("Analyzing story with xKiro…");setError("");setNotice("");
+    setBusy("master");setProgress(`Analyzing story · ${beatDetailLabel(pacingPreset)} beat detail…`);setError("");setNotice("");
     try{
       const response=await fetch("/api/manga/production-plan",{
         method:"POST",
         headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({action:"master",projectName:project.name,chapterTitle:chapter.title,story:chapter.story,analysisModel:project.analysisModel,stylePreset:resolvedStyle,existingCharacters:project.characters,existingLocations:project.locations,existingProps:project.props})
+        body:JSON.stringify({action:"master",projectName:project.name,chapterTitle:chapter.title,story:chapter.story,analysisModel:project.analysisModel,stylePreset:resolvedStyle,pacingPreset,existingCharacters:project.characters,existingLocations:project.locations,existingProps:project.props})
       });
       const master=(await parseJsonResponse<MasterResponse>(response)).data;
       const merged=mergeMangaMasterIntoProject(project,chapter.id,master);
@@ -170,6 +180,7 @@ export function MangaPageProductionStudio(){
       const initialProduction:MangaChapterProduction={
         schemaVersion:1,
         stylePreset:resolvedStyle,
+        pacingPreset,
         storySummary:master.storySummary,
         timeline:master.timeline,
         beats:master.beats,
@@ -189,7 +200,7 @@ export function MangaPageProductionStudio(){
       const planned=await planAllRemainingPages(nextProject,chapter.id,initialProduction);
       nextProject=planned.project;
       setTab("pages");
-      setNotice(`Manga script ready. ${master.beats.length} visual beats are planned into ${planned.production.pages.length} complete pages. Story coverage ${planned.production.coverage.percent}%.`);
+      setNotice(`${beatDetailLabel(pacingPreset)} detail manga ready. ${master.beats.length} visual beats are planned into ${planned.production.pages.length} complete pages. Story coverage ${planned.production.coverage.percent}%.`);
     }catch(reason){
       setError(reason instanceof Error?reason.message:"Manga planning failed");
     }finally{
@@ -328,10 +339,15 @@ export function MangaPageProductionStudio(){
             <div className="flex items-center gap-2 text-lg font-bold"><BookOpen className="text-violet-400" size={19}/> StoryFrame Premium Manga</div>
             <p className="mt-1 text-sm text-zinc-500">Story → planned panels → one complete image per manga page → clean dialogue overlay.</p>
           </div>
-          <div className="grid gap-2 sm:grid-cols-3">
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
             <select value={project.id} onChange={(e)=>applyState((current)=>({...current,activeProjectId:e.target.value}))} className="rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm">{state.projects.map((item)=><option key={item.id} value={item.id}>{item.name}</option>)}</select>
             <select value={chapter.id} onChange={(e)=>updateProject((p)=>({...p,activeChapterId:e.target.value}))} className="rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm">{project.chapters.map((item)=><option key={item.id} value={item.id}>{item.title}</option>)}</select>
             <select value={resolvedStyle} onChange={(e)=>changeStyle(e.target.value)} className="rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm">{MANGA_STYLE_PRESETS.map((item)=><option key={item}>{item}</option>)}</select>
+            <select value={pacingPreset} onChange={(e)=>changePacing(e.target.value)} title="Controls visual-beat detail; final count still adapts to chapter length." className="rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm">
+              <option value="Fast">Beat Detail: Low</option>
+              <option value="Balanced">Beat Detail: Standard</option>
+              <option value="Cinematic">Beat Detail: Highest</option>
+            </select>
           </div>
         </div>
         <div className="mt-4 flex gap-2 overflow-x-auto">{tabs.map(([id,label])=><button key={id} onClick={()=>setTab(id)} className={`whitespace-nowrap rounded-xl px-4 py-2 text-sm ${tab===id?"bg-violet-500 text-white":"bg-white/5 text-zinc-400"}`}>{label}</button>)}</div>
@@ -343,7 +359,7 @@ export function MangaPageProductionStudio(){
 
       {tab==="story"&&<section className="rounded-2xl border border-white/10 bg-[#0d1017] p-5">
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div><h2 className="font-bold">Full Story</h2><p className="text-sm text-zinc-500">AI first analyzes the story and plans every page. Image generation starts only after the script is ready.</p></div>
+          <div><h2 className="font-bold">Full Story</h2><p className="text-sm text-zinc-500">AI first analyzes the story and plans every page. Beat Detail controls pacing, while final beat/page counts still adapt to the chapter.</p></div>
           <button disabled={!!busy} onClick={()=>void buildManga()} className="rounded-xl bg-violet-500 px-4 py-3 text-sm font-bold disabled:opacity-50">{building?<Loader2 className="mr-1 inline animate-spin" size={16}/>:<Sparkles className="mr-1 inline" size={16}/>} {building?"Building Manga…":"Build Manga Script & Pages"}</button>
         </div>
         <textarea value={chapter.story} onChange={(e)=>setStory(e.target.value)} className="min-h-[420px] w-full rounded-xl border border-white/10 bg-black/25 p-4 text-sm leading-7 outline-none focus:border-violet-500/50" placeholder="Paste the full story here…"/>
@@ -358,7 +374,7 @@ export function MangaPageProductionStudio(){
 
       {tab==="script"&&<section className="space-y-4">
         <div className="rounded-2xl border border-white/10 bg-[#0d1017] p-5">
-          <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-bold">Manga Script</h2><p className="text-sm text-zinc-500">{production?`${production.beats.length} visual beats · ${production.pages.length} planned pages`:"Build the Manga Script first."}</p></div>{production&&production.nextBeatIndex<production.beats.length&&<button disabled={!!busy} onClick={()=>void planNextPages()} className="rounded-xl bg-violet-500 px-4 py-2 text-sm font-bold">Plan All Remaining Pages</button>}</div>
+          <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-bold">Manga Script</h2><p className="text-sm text-zinc-500">{production?`${production.beats.length} visual beats · ${production.pages.length} planned pages · ${beatDetailLabel(production.pacingPreset||"Balanced")} detail`:"Build the Manga Script first."}</p></div>{production&&production.nextBeatIndex<production.beats.length&&<button disabled={!!busy} onClick={()=>void planNextPages()} className="rounded-xl bg-violet-500 px-4 py-2 text-sm font-bold">Plan All Remaining Pages</button>}</div>
           {production&&<><div className="mt-4 h-2 overflow-hidden rounded-full bg-white/5"><div className="h-full bg-emerald-500" style={{width:`${production.coverage.percent}%`}}/></div><div className="mt-2 text-xs text-zinc-500">Story Coverage: {production.coverage.percent}%</div></>}
         </div>
         {production?.beats.map((beat,index)=><article key={beat.id} className="rounded-xl border border-white/8 bg-[#0d1017] p-4"><div className="text-xs font-bold text-violet-300">{index+1}. {beat.type.toUpperCase()}</div><div className="mt-2 font-semibold">{beat.storyBeat}</div><div className="mt-1 text-sm text-zinc-500">{beat.sourceText}</div></article>)}
