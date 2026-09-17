@@ -1,9 +1,9 @@
 @import "tailwindcss";
 
-:root{--bg:#f7f8fc;--panel:#ffffff;--border:#e2e8f0;--text:#111827;--muted:#64748b}
+:root{--bg:#ffffff;--panel:#ffffff;--border:#e2e8f0;--text:#111827;--muted:#64748b}
 *{box-sizing:border-box}
-html{color-scheme:light;background:#f7f8fc}
-body{margin:0;background:radial-gradient(circle at 10% -10%,rgba(139,92,246,.08),transparent 30rem),radial-gradient(circle at 90% 0%,rgba(59,130,246,.05),transparent 28rem),var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif}
+html{color-scheme:light;background:#fff}
+body{margin:0;background:#fff;color:var(--text);font-family:Arial,Helvetica,sans-serif}
 button,input,textarea,select{font:inherit}
 .panel{background:#fff;border:1px solid var(--border);box-shadow:0 14px 38px rgba(15,23,42,.07)}
 .gridbg{background-image:linear-gradient(rgba(15,23,42,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(15,23,42,.025) 1px,transparent 1px);background-size:28px 28px}
