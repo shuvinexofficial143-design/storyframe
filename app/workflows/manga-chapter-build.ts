@@ -18,6 +18,7 @@ export type MangaBackgroundBuildInput={
   stylePreset:MangaStylePreset;
   pacingPreset:MangaPacingPreset;
   masterSeed:number;
+  requestedAt:string;
   existingCharacters:unknown[];
   existingLocations:unknown[];
   existingProps:unknown[];
@@ -145,7 +146,7 @@ export async function buildMangaChapterWorkflow(input:MangaBackgroundBuildInput)
     continuityState,
     coverage:calculatePlannedCoverage(master.beats,pages),
     analysisProvider:master.provider,
-    updatedAt:new Date().toISOString()
+    updatedAt:input.requestedAt
   };
 
   return {master,production};
