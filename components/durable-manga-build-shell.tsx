@@ -89,8 +89,6 @@ export function DurableMangaBuildShell({children}:{children:ReactNode}){
       try{localStorage.removeItem(runKey(record.projectId,record.chapterId))}catch{}
       setMessage(`${record.chapterTitle} background build complete. Manga script, beats and all page plans are saved.`);
       setError("");
-      // Reload from IndexedDB so an older in-memory React state can never overwrite
-      // the newly completed server result, even if a different chapter is open.
       window.setTimeout(()=>window.location.reload(),650);
     }finally{
       applyingRef.current.delete(record.runId);
@@ -123,9 +121,9 @@ export function DurableMangaBuildShell({children}:{children:ReactNode}){
   },[applyCompletedRun]);
 
   useEffect(()=>{
-    void pollRuns();
+    const initial=window.setTimeout(()=>void pollRuns(),0);
     const timer=window.setInterval(()=>void pollRuns(),5000);
-    return()=>window.clearInterval(timer);
+    return()=>{window.clearTimeout(initial);window.clearInterval(timer)};
   },[pollRuns]);
 
   const startBackgroundBuild=async()=>{
