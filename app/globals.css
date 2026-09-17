@@ -1,3 +1,27 @@
 @import "tailwindcss";
-:root{--bg:#07080b;--panel:#11141b;--border:#262b36;--text:#f5f7fb;--muted:#8c95a8}
-*{box-sizing:border-box}html{color-scheme:dark}body{margin:0;background:radial-gradient(circle at 10% -10%,rgba(139,92,246,.18),transparent 30rem),radial-gradient(circle at 90% 0%,rgba(34,211,238,.08),transparent 30rem),var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif}button,input,textarea,select{font:inherit}.panel{background:linear-gradient(180deg,rgba(21,24,33,.96),rgba(12,14,19,.96));border:1px solid var(--border);box-shadow:0 18px 50px rgba(0,0,0,.22)}.gridbg{background-image:linear-gradient(rgba(255,255,255,.018) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.018) 1px,transparent 1px);background-size:28px 28px}
+
+:root{--bg:#f7f8fc;--panel:#ffffff;--border:#e2e8f0;--text:#111827;--muted:#64748b}
+*{box-sizing:border-box}
+html{color-scheme:light;background:#f7f8fc}
+body{margin:0;background:radial-gradient(circle at 10% -10%,rgba(139,92,246,.08),transparent 30rem),radial-gradient(circle at 90% 0%,rgba(59,130,246,.05),transparent 28rem),var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif}
+button,input,textarea,select{font:inherit}
+.panel{background:#fff;border:1px solid var(--border);box-shadow:0 14px 38px rgba(15,23,42,.07)}
+.gridbg{background-image:linear-gradient(rgba(15,23,42,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(15,23,42,.025) 1px,transparent 1px);background-size:28px 28px}
+
+/* Manga Studio used a dark palette before the light redesign. These overrides
+   keep old component markup compatible while presenting one consistent white UI. */
+[class*="bg-[#080a0f]"],[class*="bg-[#0d1017]"],[class*="bg-[#0b0d13]"],[class*="bg-[#11141c]"]{background:#fff!important;color:#111827!important}
+[class*="bg-black/25"],[class*="bg-black/20"]{background:#f8fafc!important}
+[class*="bg-white/5"]{background:#f1f5f9!important}
+[class*="border-white/10"],[class*="border-white/8"]{border-color:#e2e8f0!important}
+.text-zinc-100,.text-zinc-200,.text-zinc-300{color:#111827!important}
+.text-zinc-400{color:#475569!important}
+.text-zinc-500{color:#64748b!important}
+.text-zinc-600{color:#94a3b8!important}
+.text-violet-200,.text-violet-300,.text-violet-400{color:#6d28d9!important}
+.text-emerald-200,.text-emerald-300{color:#047857!important}
+.text-cyan-300{color:#0e7490!important}
+.text-amber-200{color:#92400e!important}
+select,textarea,input{color:#111827;background-color:#fff}
+option{color:#111827;background:#fff}
+textarea::placeholder,input::placeholder{color:#94a3b8}
