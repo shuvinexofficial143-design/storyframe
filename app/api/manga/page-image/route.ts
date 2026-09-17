@@ -1,6 +1,6 @@
 import {NextResponse} from "next/server";
 import {z} from "zod";
-import {generateImageWithFallback} from "@/lib/image-providers";
+import {generateImageWithFallback,isRetryableImageProviderFailure} from "@/lib/image-providers";
 
 const Input=z.object({
   prompt:z.string().min(40).max(40000),
@@ -8,6 +8,8 @@ const Input=z.object({
   negativePrompt:z.string().optional(),
   referenceImages:z.array(z.string()).max(4).default([])
 });
+
+export const maxDuration=120;
 
 export async function POST(request:Request){
   try{
@@ -18,7 +20,9 @@ export async function POST(request:Request){
     const model=process.env.GEMINI_PAGE_IMAGE_MODEL?.trim()||undefined;
     const width=1200;
     const height=1800;
-    const result=await generateImageWithFallback({prompt,seed,width,height,negativePrompt,referenceImages,model});
+    // Manga pages are continuity-critical. Do not silently switch image models
+    // on a temporary Gemini quota spike; let the browser queue pause and retry.
+    const result=await generateImageWithFallback({prompt,seed,width,height,negativePrompt,referenceImages,model,allowFallback:false});
 
     return NextResponse.json({
       imageDataUrl:result.imageDataUrl,
@@ -38,6 +42,11 @@ export async function POST(request:Request){
     });
   }catch(error){
     console.error("Full manga page generation failed",error);
-    return NextResponse.json({error:error instanceof Error?error.message:"Manga page generation failed"},{status:502});
+    const message=error instanceof Error?error.message:"Manga page generation failed";
+    if(isRetryableImageProviderFailure(error)){
+      const quota=/\b429\b|resource exhausted|quota|rate limit|too many requests/i.test(message);
+      return NextResponse.json({error:message,retryable:true,retryAfterMs:quota?20_000:10_000},{status:quota?429:503});
+    }
+    return NextResponse.json({error:message},{status:502});
   }
 }
