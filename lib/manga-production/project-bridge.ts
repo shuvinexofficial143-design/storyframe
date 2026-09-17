@@ -1,8 +1,9 @@
 import type {AnalyzeChapterResponse,MangaProject} from "../continuity/project-types";
 import {mergeCharacterReferences,mergeLocationReferences,mergeObjectReferences} from "../continuity/project-merge";
-import type {MangaMasterAnalysis} from "./types";
+import {isBlackAndWhiteMangaStyle} from "./presets";
+import type {MangaMasterAnalysis,MangaStylePreset} from "./types";
 
-export function mergeMangaMasterIntoProject(project:MangaProject,chapterId:string,master:MangaMasterAnalysis){
+export function mergeMangaMasterIntoProject(project:MangaProject,chapterId:string,master:MangaMasterAnalysis,stylePreset:MangaStylePreset="Classic Black & White Manga"){
   const characters:AnalyzeChapterResponse["characters"]=master.characters.map((item)=>({
     name:item.name,
     role:item.role,
@@ -17,12 +18,16 @@ export function mergeMangaMasterIntoProject(project:MangaProject,chapterId:strin
     personalityVisuals:item.consistencyNotes
   }));
 
+  const locationPalette=isBlackAndWhiteMangaStyle(stylePreset)
+    ?"black, white, grayscale screentones"
+    :project.visualBible.visualStyle.colorPalette.join(", ")||"preserve the story-established full-color palette";
+
   const locations:AnalyzeChapterResponse["locations"]=master.locations.map((item)=>({
     name:item.name,
     architectureStyle:item.architecture,
     lighting:item.lighting,
-    colorPalette:"black, white, grayscale screentones",
-    referencePrompt:`${item.name}, ${item.architecture}. Fixed layout: ${Object.entries(item.layout).map(([key,value])=>`${key}: ${value}`).join("; ")}. Important props: ${item.importantProps.join(", ")||"none"}. ${item.continuityNotes}`,
+    colorPalette:locationPalette,
+    referencePrompt:`${item.name}, ${item.architecture}. Fixed layout: ${Object.entries(item.layout).map(([key,value])=>`${key}: ${value}`).join("; ")}. Important props: ${item.importantProps.join(", ")||"none"}. Palette: ${locationPalette}. ${item.continuityNotes}`,
     geometryIdentity:Object.entries(item.layout).map(([key,value])=>`${key}: ${value}`).join("; ")||item.continuityNotes,
     materials:"preserve story-established materials",
     importantFeatures:[...Object.entries(item.layout).map(([key,value])=>`${key}: ${value}`),...item.importantProps]
