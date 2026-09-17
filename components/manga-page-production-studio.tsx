@@ -1,10 +1,10 @@
 "use client";
 
 import {useEffect,useMemo,useRef,useState} from "react";
-import {BookOpen,Download,ImageIcon,Loader2,MapPinned,Sparkles,Users} from "lucide-react";
+import {BookOpen,Download,ImageIcon,Loader2,MapPinned,Plus,Sparkles,Users} from "lucide-react";
 import {parseJsonResponse} from "@/lib/fetch-json";
 import {deriveSeed} from "@/lib/continuity/seed";
-import {createProject,normalizeName} from "@/lib/continuity/project-defaults";
+import {createChapter,createProject,normalizeName} from "@/lib/continuity/project-defaults";
 import {loadStudioState,saveStudioState} from "@/lib/continuity/storage";
 import type {CharacterReference,MangaChapter,MangaProject,MangaStudioState} from "@/lib/continuity/project-types";
 import {composeGeneratedMangaPage} from "@/lib/manga-production/full-page-composer";
@@ -14,6 +14,8 @@ import {calculatePlannedCoverage} from "@/lib/manga-production/validators";
 import {MANGA_PACING_PRESETS,type MangaPacingPreset} from "@/lib/manga-production/pacing-policy";
 import {MANGA_STYLE_PRESETS,type MangaChapterProduction,type MangaMasterAnalysis,type MangaPage,type MangaPagePlan,type MangaStylePreset} from "@/lib/manga-production/types";
 import {downloadDataUrl} from "@/lib/manga-production/composer";
+import {continuationContextText,getInheritedMangaStyle,getPreviousChapterContinuity,getPreviousRenderedMangaPage} from "@/lib/manga-production/chapter-continuity";
+import {requestQueuedMangaImage} from "@/lib/manga-production/image-request-queue";
 
 const now=()=>new Date().toISOString();
 
@@ -89,17 +91,29 @@ export function MangaPageProductionStudio(){
       const saved=localStorage.getItem(`manga-style-${chapter.id}`);
       if(MANGA_STYLE_PRESETS.includes(saved as MangaStylePreset))return saved as MangaStylePreset;
     }catch{}
-    return "Classic Black & White Manga" as MangaStylePreset;
+    return getInheritedMangaStyle(project,chapter.id)||"Classic Black & White Manga";
   })();
 
-  const preparePrimaryReference=async(character:CharacterReference)=>{
-    const response=await fetch("/api/manga/reference-continuity",{
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({name:character.name,referencePrompt:character.referencePrompt,seed:character.seedBase,view:"primary"})
-    });
-    return parseJsonResponse<ReferenceResponse>(response);
+  const addChapter=()=>{
+    if(busy)return;
+    const newChapter=createChapter(`Chapter ${project.chapters.length+1}`);
+    const currentIndex=project.chapters.findIndex((item)=>item.id===chapter.id);
+    const chapters=[...project.chapters];
+    chapters.splice(currentIndex>=0?currentIndex+1:chapters.length,0,newChapter);
+    const inheritedStyle=production?.stylePreset||resolvedStyle;
+    try{localStorage.setItem(`manga-style-${newChapter.id}`,inheritedStyle)}catch{}
+    updateProject((current)=>({...current,activeChapterId:newChapter.id,chapters,updatedAt:now()}));
+    setTab("story");
+    setError("");
+    setNotice(`${newChapter.title} created. Character, location, prop and previous-chapter visual continuity will be inherited automatically.`);
   };
+
+  const preparePrimaryReference=async(character:CharacterReference)=>requestQueuedMangaImage<ReferenceResponse>({
+    url:"/api/manga/reference-continuity",
+    label:`Preparing ${character.name} reference`,
+    onStatus:setProgress,
+    body:{name:character.name,referencePrompt:character.referencePrompt,seed:character.seedBase,view:"primary"}
+  });
 
   const requestPageChunk=async(currentProject:MangaProject,currentProduction:MangaChapterProduction,startBeatIndex:number,pageStartNumber:number)=>{
     const response=await fetch("/api/manga/production-plan",{
@@ -167,26 +181,29 @@ export function MangaPageProductionStudio(){
         body:JSON.stringify({action:"master",projectName:project.name,chapterTitle:chapter.title,story:chapter.story,analysisModel:project.analysisModel,stylePreset:resolvedStyle,pacingPreset,existingCharacters:project.characters,existingLocations:project.locations,existingProps:project.props})
       });
       const master=(await parseJsonResponse<MasterResponse>(response)).data;
-      const merged=mergeMangaMasterIntoProject(project,chapter.id,master);
+      const merged=mergeMangaMasterIntoProject(project,chapter.id,master,resolvedStyle);
+      const previousContinuity=getPreviousChapterContinuity(project,chapter.id);
+      const inheritedCharacters=previousContinuity?{...master.initialCharacterStates,...previousContinuity.characters}:master.initialCharacterStates;
+      const chapterContext=continuationContextText(project,chapter.id);
       const initialState={
         currentPage:0,
-        timeline:master.timeline[0]?.event||"Story start",
-        timeOfDay:master.timeline[0]?.timeOfDay||"unspecified",
-        currentLocation:master.timeline[0]?.location||"",
-        characters:master.initialCharacterStates,
-        activeProps:master.props.filter((item)=>item.currentOwner||item.currentLocation).map((item)=>item.name),
-        previousPageEndState:"Story start"
+        timeline:previousContinuity?.timeline||master.timeline[0]?.event||"Story start",
+        timeOfDay:previousContinuity?.timeOfDay||master.timeline[0]?.timeOfDay||"unspecified",
+        currentLocation:previousContinuity?.currentLocation||master.timeline[0]?.location||"",
+        characters:inheritedCharacters,
+        activeProps:previousContinuity?.activeProps?.length?previousContinuity.activeProps:master.props.filter((item)=>item.currentOwner||item.currentLocation).map((item)=>item.name),
+        previousPageEndState:previousContinuity?.previousPageEndState||"Story start"
       };
       const initialProduction:MangaChapterProduction={
         schemaVersion:1,
         stylePreset:resolvedStyle,
         pacingPreset,
-        storySummary:master.storySummary,
+        storySummary:chapterContext?`${chapterContext}\nCurrent chapter summary: ${master.storySummary}`:master.storySummary,
         timeline:master.timeline,
         beats:master.beats,
         locationProfiles:master.locations,
         propStates:master.props,
-        initialCharacterStates:master.initialCharacterStates,
+        initialCharacterStates:inheritedCharacters,
         pages:[],
         nextBeatIndex:0,
         continuityState:initialState,
@@ -200,7 +217,7 @@ export function MangaPageProductionStudio(){
       const planned=await planAllRemainingPages(nextProject,chapter.id,initialProduction);
       nextProject=planned.project;
       setTab("pages");
-      setNotice(`${beatDetailLabel(pacingPreset)} detail manga ready. ${master.beats.length} visual beats are planned into ${planned.production.pages.length} complete pages. Story coverage ${planned.production.coverage.percent}%.`);
+      setNotice(`${beatDetailLabel(pacingPreset)} detail manga ready. ${master.beats.length} visual beats are planned into ${planned.production.pages.length} complete pages. Story coverage ${planned.production.coverage.percent}%.${previousContinuity?" Previous chapter continuity is locked in.":""}`);
     }catch(reason){
       setError(reason instanceof Error?reason.message:"Manga planning failed");
     }finally{
@@ -256,22 +273,21 @@ export function MangaPageProductionStudio(){
     const latest=locatePage(pageId);
     if(!latest)return;
     const pageIndex=latest.production.pages.findIndex((item)=>item.id===pageId);
-    const previousPage=pageIndex>0?latest.production.pages[pageIndex-1]:undefined;
+    const previousPage=pageIndex>0?latest.production.pages[pageIndex-1]:getPreviousRenderedMangaPage(currentProject,latest.chapter.id);
     const compiled=compileMangaPagePrompt({project:currentProject,production:latest.production,page:latest.page,previousPage,stronger});
     const seed=deriveSeed(currentProject.visualBible.masterSeed,latest.page.id,stronger?1:0);
 
     applyState((currentState)=>mutateProject(currentState,currentProject.id,(p)=>({...p,chapters:p.chapters.map((c)=>c.id===latest.chapter.id&&c.manga?{...c,manga:{...c.manga,pages:c.manga.pages.map((pg)=>pg.id===pageId?{...pg,status:"generating",error:undefined}:pg),updatedAt:now()}}:c)})));
 
-    setProgress(`Generating complete Page ${latest.page.pageNumber} in one image call…`);
-    const response=await fetch("/api/manga/page-image",{
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({prompt:compiled.prompt,negativePrompt:compiled.negativePrompt,seed,referenceImages:compiled.referenceImages})
+    const data=await requestQueuedMangaImage<ImageResponse>({
+      url:"/api/manga/page-image",
+      label:`Page ${latest.page.pageNumber}`,
+      onStatus:setProgress,
+      body:{prompt:compiled.prompt,negativePrompt:compiled.negativePrompt,seed,referenceImages:compiled.referenceImages}
     });
-    const data=await parseJsonResponse<ImageResponse>(response);
     const pageForCompose={...latest.page,rawPageImageDataUrl:data.imageDataUrl,pagePrompt:compiled.prompt,renderProvider:data.provider,renderModel:data.model,renderSeed:data.seed,status:"generated" as const};
     setProgress(`Adding dialogue and SFX to Page ${latest.page.pageNumber}…`);
-    const composed=await composeGeneratedMangaPage(data.imageDataUrl,pageForCompose);
+    const composed=await composeGeneratedMangaPage(data.imageDataUrl,pageForCompose,latest.production.stylePreset);
 
     applyState((currentState)=>mutateProject(currentState,currentProject.id,(p)=>({...p,chapters:p.chapters.map((c)=>c.id===latest.chapter.id&&c.manga?{...c,manga:{...c.manga,pages:c.manga.pages.map((pg)=>pg.id===pageId?{...pg,...pageForCompose,composedImageDataUrl:composed,status:"composed",error:undefined}:pg),updatedAt:now()}}:c),updatedAt:now()})));
     if(data.warning)setNotice(`Page ${latest.page.pageNumber} generated. ${data.warning}`);
@@ -295,16 +311,18 @@ export function MangaPageProductionStudio(){
   const generateAllPages=async()=>{
     const currentProduction=chapter.manga;
     if(!currentProduction?.pages.length)return;
+    const pendingPages=currentProduction.pages.filter((page)=>!page.composedImageDataUrl);
+    if(!pendingPages.length){setNotice("All manga pages are already generated.");return}
     setBusy("all-pages");setError("");setNotice("");
     try{
-      for(let index=0;index<currentProduction.pages.length;index+=1){
-        const pageId=currentProduction.pages[index].id;
-        setProgress(`Chapter render ${index+1}/${currentProduction.pages.length}: preparing Page ${currentProduction.pages[index].pageNumber}…`);
-        await renderPage(pageId,false);
+      for(let index=0;index<pendingPages.length;index+=1){
+        const page=pendingPages[index];
+        setProgress(`Sequential chapter render ${index+1}/${pendingPages.length}: preparing Page ${page.pageNumber}…`);
+        await renderPage(page.id,false);
       }
-      setNotice(`${currentProduction.pages.length} manga pages generated page-by-page. Each page used one main image generation call.`);
+      setNotice(`${pendingPages.length} remaining manga pages generated sequentially. The queue used one Gemini image request at a time and paused automatically when rate-limited.`);
     }catch(reason){
-      setError(reason instanceof Error?reason.message:"Chapter page generation stopped");
+      setError(reason instanceof Error?reason.message:"Chapter page generation stopped. Run Generate All Pages again to resume from the first unfinished page.");
     }finally{
       setBusy("");setProgress("");
     }
@@ -313,18 +331,18 @@ export function MangaPageProductionStudio(){
   const generateReference=async(character:CharacterReference,view:ReferenceView)=>{
     setBusy(`ref-${character.id}-${view}`);setError("");
     try{
-      const response=await fetch("/api/manga/reference-continuity",{
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({name:character.name,referencePrompt:character.referencePrompt,seed:character.seedBase,view})
+      const ref=await requestQueuedMangaImage<ReferenceResponse>({
+        url:"/api/manga/reference-continuity",
+        label:`${character.name} ${view} reference`,
+        onStatus:setProgress,
+        body:{name:character.name,referencePrompt:character.referencePrompt,seed:character.seedBase,view}
       });
-      const ref=await parseJsonResponse<ReferenceResponse>(response);
       updateProject((p)=>({...p,characters:p.characters.map((item)=>item.id===character.id?{...item,manualReferenceImage:view==="primary"?ref.imageDataUrl:item.manualReferenceImage,referenceImages:[...item.referenceImages,{type:view,url:ref.sourceUrl||ref.imageDataUrl,seed:ref.seed,provider:ref.provider,createdAt:now()}],updatedAt:now()}:item),updatedAt:now()}));
       setNotice(`${character.name}: ${view} reference saved.`);
     }catch(reason){
       setError(reason instanceof Error?reason.message:"Reference generation failed");
     }finally{
-      setBusy("");
+      setBusy("");setProgress("");
     }
   };
 
@@ -341,7 +359,7 @@ export function MangaPageProductionStudio(){
           </div>
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
             <select value={project.id} onChange={(e)=>applyState((current)=>({...current,activeProjectId:e.target.value}))} className="rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm">{state.projects.map((item)=><option key={item.id} value={item.id}>{item.name}</option>)}</select>
-            <select value={chapter.id} onChange={(e)=>updateProject((p)=>({...p,activeChapterId:e.target.value}))} className="rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm">{project.chapters.map((item)=><option key={item.id} value={item.id}>{item.title}</option>)}</select>
+            <div className="flex min-w-0 gap-2"><select value={chapter.id} onChange={(e)=>updateProject((p)=>({...p,activeChapterId:e.target.value}))} className="min-w-0 flex-1 rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm">{project.chapters.map((item)=><option key={item.id} value={item.id}>{item.title}</option>)}</select><button disabled={!!busy} onClick={addChapter} title="Create the next chapter with previous-chapter continuity" className="whitespace-nowrap rounded-xl border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-xs font-bold text-violet-200 disabled:opacity-50"><Plus className="mr-1 inline" size={13}/> New Chapter</button></div>
             <select value={resolvedStyle} onChange={(e)=>changeStyle(e.target.value)} className="rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm">{MANGA_STYLE_PRESETS.map((item)=><option key={item}>{item}</option>)}</select>
             <select value={pacingPreset} onChange={(e)=>changePacing(e.target.value)} title="Controls visual-beat detail; final count still adapts to chapter length." className="rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm">
               <option value="Fast">Beat Detail: Low</option>
@@ -359,7 +377,7 @@ export function MangaPageProductionStudio(){
 
       {tab==="story"&&<section className="rounded-2xl border border-white/10 bg-[#0d1017] p-5">
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div><h2 className="font-bold">Full Story</h2><p className="text-sm text-zinc-500">AI first analyzes the story and plans every page. Beat Detail controls pacing, while final beat/page counts still adapt to the chapter.</p></div>
+          <div><h2 className="font-bold">Full Story</h2><p className="text-sm text-zinc-500">AI first analyzes the story and plans every page. New chapters automatically continue the previous chapter's locked characters, locations, props and ending state.</p></div>
           <button disabled={!!busy} onClick={()=>void buildManga()} className="rounded-xl bg-violet-500 px-4 py-3 text-sm font-bold disabled:opacity-50">{building?<Loader2 className="mr-1 inline animate-spin" size={16}/>:<Sparkles className="mr-1 inline" size={16}/>} {building?"Building Manga…":"Build Manga Script & Pages"}</button>
         </div>
         <textarea value={chapter.story} onChange={(e)=>setStory(e.target.value)} className="min-h-[420px] w-full rounded-xl border border-white/10 bg-black/25 p-4 text-sm leading-7 outline-none focus:border-violet-500/50" placeholder="Paste the full story here…"/>
@@ -382,7 +400,7 @@ export function MangaPageProductionStudio(){
 
       {tab==="pages"&&<section className="space-y-6">
         {production?.pages.length?<>
-          <div className="flex flex-col gap-3 rounded-2xl border border-violet-500/20 bg-violet-500/8 p-4 sm:flex-row sm:items-center sm:justify-between"><div><div className="font-bold">Premium Page Mode</div><div className="text-sm text-zinc-400">Each planned page is rendered in one main image call. Panels stay inside that page.</div></div><button disabled={!!busy} onClick={()=>void generateAllPages()} className="rounded-xl bg-violet-500 px-4 py-3 text-sm font-bold disabled:opacity-50">{busy==="all-pages"?<Loader2 className="mr-1 inline animate-spin" size={15}/>:<Sparkles className="mr-1 inline" size={15}/>} Generate All Pages</button></div>
+          <div className="flex flex-col gap-3 rounded-2xl border border-violet-500/20 bg-violet-500/8 p-4 sm:flex-row sm:items-center sm:justify-between"><div><div className="font-bold">Premium Page Mode</div><div className="text-sm text-zinc-400">Pages render sequentially: one Gemini image request at a time, with automatic cooldown and quota backoff. Re-running resumes unfinished pages.</div></div><button disabled={!!busy} onClick={()=>void generateAllPages()} className="rounded-xl bg-violet-500 px-4 py-3 text-sm font-bold disabled:opacity-50">{busy==="all-pages"?<Loader2 className="mr-1 inline animate-spin" size={15}/>:<Sparkles className="mr-1 inline" size={15}/>} Generate All Pages</button></div>
           {production.pages.map((page)=><article key={page.id} className="rounded-2xl border border-white/10 bg-[#0d1017] p-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><div className="text-lg font-bold">Page {page.pageNumber} <span className="ml-2 text-xs font-normal text-violet-300">{page.panels.length} panels</span></div><div className="mt-1 text-xs text-zinc-500">{page.pagePurpose} · {page.panelLayout}</div>{page.renderProvider&&<div className="mt-1 text-[11px] text-zinc-600">{page.renderProvider} · {page.renderModel}</div>}</div><div className="flex flex-wrap gap-2"><button disabled={!!busy} onClick={()=>void generatePage(page.id)} className="rounded-lg bg-violet-500 px-3 py-2 text-xs font-bold">{busy===page.id?<Loader2 className="mr-1 inline animate-spin" size={14}/>:<ImageIcon className="mr-1 inline" size={14}/>} {page.composedImageDataUrl?"Regenerate Page":"Generate Page"}</button><button disabled={!!busy} onClick={()=>void generatePage(page.id,true)} className="rounded-lg border border-white/10 px-3 py-2 text-xs">Strong Continuity Retry</button>{page.composedImageDataUrl&&<button onClick={()=>downloadDataUrl(page.composedImageDataUrl!,`manga-page-${page.pageNumber}.jpg`)} className="rounded-lg border border-emerald-500/30 px-3 py-2 text-xs text-emerald-300"><Download className="mr-1 inline" size={13}/> Download</button>}</div></div>
             {page.composedImageDataUrl?<img src={page.composedImageDataUrl} alt={`Manga page ${page.pageNumber}`} className="mx-auto mt-5 max-h-[980px] w-auto rounded-xl border border-white/10 bg-white object-contain"/>:<div className="mt-5 grid min-h-[440px] place-items-center rounded-xl border border-dashed border-white/10 bg-black/20 text-center text-zinc-600"><div><ImageIcon className="mx-auto mb-3"/><div>Full Page {page.pageNumber} will appear here</div><div className="mt-1 text-xs">One page image containing all {page.panels.length} planned panels</div></div></div>}
