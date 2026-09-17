@@ -10,7 +10,10 @@ import {STORY_ANALYSIS_MODELS,isStoryAnalysisModel,isVertexStoryAnalysisModel,st
 import {withStoryModelFallback} from "@/lib/story-model-fallback";
 import {XKiroRequestError} from "@/lib/xkiro";
 
-export const maxDuration=120;
+// Master analysis can legitimately include one long Gemini call plus an optional
+// pacing-normalization pass. Keep enough headroom for both instead of letting
+// Vercel kill the function at the old 120s boundary and return non-JSON HTML.
+export const maxDuration=300;
 
 const DEFAULT_GEMINI_PAGE_PLANNING_COOLDOWN_MS=12_000;
 
@@ -83,17 +86,30 @@ export async function POST(request:Request){
 
     if(data.action==="master"){
       const masterData=data;
+
+      // Do not repeat a potentially 120-second master-analysis call inside the
+      // same server invocation. If Gemini times out/429s, fail over immediately
+      // to xKiro so the request still has time to return a proper JSON response.
       const result=await withStoryModelFallback({
         model:analysisModel,
+        retryDelaysMs:[],
         run:async(model)=>{
           const masterInput={...masterData,analysisModel:model};
-          const analyzed=shouldUseLongStoryAnalysis(masterData.story)
+          return shouldUseLongStoryAnalysis(masterData.story)
             ?await analyzeLongMangaMaster(masterInput)
             :await analyzeMangaMaster(masterInput);
-          return refineMangaMasterForPacing({analysisModel:model,pacingPreset:masterData.pacingPreset,story:masterData.story,master:analyzed});
         }
       });
-      return NextResponse.json({kind:"master",data:{...result.data,provider:providerLabel(result.model,result.fallbackUsed,masterData.pacingPreset)}});
+
+      // Pacing refinement is intentionally outside the fallback wrapper. A
+      // refinement failure must never cause the entire expensive master analysis
+      // to run again. When fallback was already needed, return that valid master
+      // immediately and let page planning preserve its beat order/continuity.
+      const refined=result.fallbackUsed
+        ?result.data
+        :await refineMangaMasterForPacing({analysisModel:result.model,pacingPreset:masterData.pacingPreset,story:masterData.story,master:result.data});
+
+      return NextResponse.json({kind:"master",data:{...refined,provider:providerLabel(result.model,result.fallbackUsed,masterData.pacingPreset)}});
     }
 
     const pagesData=data;
