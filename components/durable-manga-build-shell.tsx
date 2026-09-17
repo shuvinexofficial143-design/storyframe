@@ -55,6 +55,7 @@ export function DurableMangaBuildShell({children}:{children:ReactNode}){
   const [error,setError]=useState("");
   const [runningCount,setRunningCount]=useState(0);
   const applyingRef=useRef(new Set<string>());
+  const startingRef=useRef(false);
 
   const applyCompletedRun=useCallback(async(record:PendingRun,result:{master:MangaMasterAnalysis;production:MangaChapterProduction})=>{
     if(applyingRef.current.has(record.runId))return;
@@ -88,9 +89,9 @@ export function DurableMangaBuildShell({children}:{children:ReactNode}){
       try{localStorage.removeItem(runKey(record.projectId,record.chapterId))}catch{}
       setMessage(`${record.chapterTitle} background build complete. Manga script, beats and all page plans are saved.`);
       setError("");
-      if(saved.activeProjectId===record.projectId&&project.activeChapterId===record.chapterId){
-        window.setTimeout(()=>window.location.reload(),650);
-      }
+      // Reload from IndexedDB so an older in-memory React state can never overwrite
+      // the newly completed server result, even if a different chapter is open.
+      window.setTimeout(()=>window.location.reload(),650);
     }finally{
       applyingRef.current.delete(record.runId);
     }
@@ -128,52 +129,58 @@ export function DurableMangaBuildShell({children}:{children:ReactNode}){
   },[pollRuns]);
 
   const startBackgroundBuild=async()=>{
-    setError("");
-    setMessage("Saving the current story and starting the server workflow…");
-    await wait(450);
-    const saved=await loadStudioState();
-    if(!saved?.projects.length)throw new Error("Manga Studio project is not ready yet. Please try again.");
-    const project=saved.projects.find((item)=>item.id===saved.activeProjectId)||saved.projects[0];
-    const chapter=project.chapters.find((item)=>item.id===project.activeChapterId)||project.chapters[0];
-    if(!chapter||chapter.story.trim().length<20)throw new Error("पहले पूरी story paste करो।");
-
-    const key=runKey(project.id,chapter.id);
+    if(startingRef.current)return;
+    startingRef.current=true;
     try{
-      const existing=localStorage.getItem(key);
-      if(existing){
-        const parsed=JSON.parse(existing) as PendingRun;
-        if(parsed.runId){setMessage(`${chapter.title} is already building on the server.`);return}
-      }
-    }catch{}
+      setError("");
+      setMessage("Saving the current story and starting the server workflow…");
+      await wait(450);
+      const saved=await loadStudioState();
+      if(!saved?.projects.length)throw new Error("Manga Studio project is not ready yet. Please try again.");
+      const project=saved.projects.find((item)=>item.id===saved.activeProjectId)||saved.projects[0];
+      const chapter=project.chapters.find((item)=>item.id===project.activeChapterId)||project.chapters[0];
+      if(!chapter||chapter.story.trim().length<20)throw new Error("पहले पूरी story paste करो।");
 
-    const pacingPreset=selectedPacingFromPage();
-    const stylePreset=selectedStyleForChapter(chapter.id,chapter.manga?.stylePreset,getInheritedMangaStyle(project,chapter.id));
-    const response=await fetch("/api/manga/background-build",{
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({
-        projectName:project.name,
-        chapterTitle:chapter.title,
-        story:chapter.story,
-        analysisModel:project.analysisModel,
-        stylePreset,
-        pacingPreset,
-        masterSeed:project.visualBible.masterSeed,
-        requestedAt:new Date().toISOString(),
-        existingCharacters:project.characters,
-        existingLocations:project.locations,
-        existingProps:project.props,
-        previousContinuity:getPreviousChapterContinuity(project,chapter.id),
-        chapterContext:continuationContextText(project,chapter.id)
-      })
-    });
-    const data=await response.json().catch(()=>({error:"Background build start returned invalid data."})) as StartResponse;
-    if(!response.ok||!data.runId)throw new Error(data.error||`Could not start background manga build (${response.status}).`);
-    const record:PendingRun={runId:data.runId,projectId:project.id,chapterId:chapter.id,chapterTitle:chapter.title,startedAt:new Date().toISOString()};
-    try{localStorage.setItem(key,JSON.stringify(record))}catch{}
-    setRunningCount((count)=>Math.max(1,count+1));
-    setMessage(`${chapter.title} background build started. You can close Chrome now; story analysis and page planning will continue on the server.`);
-    void pollRuns();
+      const key=runKey(project.id,chapter.id);
+      try{
+        const existing=localStorage.getItem(key);
+        if(existing){
+          const parsed=JSON.parse(existing) as PendingRun;
+          if(parsed.runId){setMessage(`${chapter.title} is already building on the server.`);return}
+        }
+      }catch{}
+
+      const pacingPreset=selectedPacingFromPage();
+      const stylePreset=selectedStyleForChapter(chapter.id,chapter.manga?.stylePreset,getInheritedMangaStyle(project,chapter.id));
+      const response=await fetch("/api/manga/background-build",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          projectName:project.name,
+          chapterTitle:chapter.title,
+          story:chapter.story,
+          analysisModel:project.analysisModel,
+          stylePreset,
+          pacingPreset,
+          masterSeed:project.visualBible.masterSeed,
+          requestedAt:new Date().toISOString(),
+          existingCharacters:project.characters,
+          existingLocations:project.locations,
+          existingProps:project.props,
+          previousContinuity:getPreviousChapterContinuity(project,chapter.id),
+          chapterContext:continuationContextText(project,chapter.id)
+        })
+      });
+      const data=await response.json().catch(()=>({error:"Background build start returned invalid data."})) as StartResponse;
+      if(!response.ok||!data.runId)throw new Error(data.error||`Could not start background manga build (${response.status}).`);
+      const record:PendingRun={runId:data.runId,projectId:project.id,chapterId:chapter.id,chapterTitle:chapter.title,startedAt:new Date().toISOString()};
+      try{localStorage.setItem(key,JSON.stringify(record))}catch{}
+      setRunningCount((count)=>Math.max(1,count+1));
+      setMessage(`${chapter.title} background build started. You can close Chrome now; story analysis and page planning will continue on the server.`);
+      void pollRuns();
+    }finally{
+      startingRef.current=false;
+    }
   };
 
   const captureBuildClick=(event:MouseEvent<HTMLDivElement>)=>{
@@ -187,7 +194,7 @@ export function DurableMangaBuildShell({children}:{children:ReactNode}){
     void startBackgroundBuild().catch((reason)=>setError(reason instanceof Error?reason.message:"Could not start background manga build."));
   };
 
-  return <div onClickCapture={captureBuildClick} className="min-h-screen bg-slate-50">
+  return <div onClickCapture={captureBuildClick} className="min-h-screen bg-white">
     {(message||error||runningCount>0)&&<div className="mx-auto max-w-7xl px-4 pt-4">
       {error?<div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div>:<div className="flex items-center gap-3 rounded-2xl border border-violet-200 bg-violet-50 p-4 text-sm text-violet-800">{runningCount>0?<Loader2 className="shrink-0 animate-spin" size={17}/>:<CheckCircle2 className="shrink-0" size={17}/>}<CloudCog className="shrink-0" size={17}/><span>{message}</span></div>}
     </div>}
