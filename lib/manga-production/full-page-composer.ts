@@ -1,5 +1,5 @@
-import {getMangaLayout} from "./presets";
-import type {MangaDialogue,MangaPage} from "./types";
+import {getMangaLayout,isBlackAndWhiteMangaStyle} from "./presets";
+import type {MangaDialogue,MangaPage,MangaStylePreset} from "./types";
 
 const PAGE_WIDTH=1200;
 const PAGE_HEIGHT=1800;
@@ -14,14 +14,14 @@ function loadImage(src:string){
   });
 }
 
-function drawCover(ctx:CanvasRenderingContext2D,image:HTMLImageElement){
+function drawCover(ctx:CanvasRenderingContext2D,image:HTMLImageElement,stylePreset:MangaStylePreset){
   const scale=Math.max(PAGE_WIDTH/image.width,PAGE_HEIGHT/image.height);
   const sw=PAGE_WIDTH/scale;
   const sh=PAGE_HEIGHT/scale;
   const sx=(image.width-sw)/2;
   const sy=(image.height-sh)/2;
   ctx.save();
-  ctx.filter="grayscale(1) contrast(1.04)";
+  ctx.filter=isBlackAndWhiteMangaStyle(stylePreset)?"grayscale(1) contrast(1.04)":"none";
   ctx.drawImage(image,sx,sy,sw,sh,0,0,PAGE_WIDTH,PAGE_HEIGHT);
   ctx.restore();
 }
@@ -88,7 +88,7 @@ function drawDialogue(ctx:CanvasRenderingContext2D,dialogue:MangaDialogue,index:
   ctx.restore();
 }
 
-export async function composeGeneratedMangaPage(baseImageDataUrl:string,page:MangaPage){
+export async function composeGeneratedMangaPage(baseImageDataUrl:string,page:MangaPage,stylePreset:MangaStylePreset="Classic Black & White Manga"){
   if(typeof document==="undefined")throw new Error("Manga page text composition requires a browser.");
   const canvas=document.createElement("canvas");
   canvas.width=PAGE_WIDTH;
@@ -99,7 +99,7 @@ export async function composeGeneratedMangaPage(baseImageDataUrl:string,page:Man
   ctx.fillStyle="#fff";
   ctx.fillRect(0,0,PAGE_WIDTH,PAGE_HEIGHT);
   const image=await loadImage(baseImageDataUrl);
-  drawCover(ctx,image);
+  drawCover(ctx,image,stylePreset);
 
   const layout=getMangaLayout(page.panelLayout,page.panels.length);
   const contentW=PAGE_WIDTH-MARGIN*2;
