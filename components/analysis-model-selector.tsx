@@ -51,13 +51,13 @@ export function AnalysisModelSelector(){
 
   const selected=STORY_ANALYSIS_MODEL_OPTIONS.find((item)=>item.value===model)||STORY_ANALYSIS_MODEL_OPTIONS[0];
 
-  return <div className="border-b border-white/10 bg-[#0b0d13] px-4 py-3 text-zinc-100">
+  return <div className="border-b border-slate-200 bg-white px-4 py-3 text-slate-900">
     <div className="mx-auto flex max-w-7xl flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex items-center gap-3">
-        <div className="grid h-9 w-9 place-items-center rounded-xl bg-violet-500/15 text-violet-300"><BrainCircuit size={17}/></div>
-        <div><div className="text-xs font-bold uppercase tracking-[.16em] text-zinc-500">AI Story Model</div><div className="text-xs text-zinc-400">{selected.description}</div></div>
+        <div className="grid h-9 w-9 place-items-center rounded-xl bg-violet-100 text-violet-700"><BrainCircuit size={17}/></div>
+        <div><div className="text-xs font-bold uppercase tracking-[.16em] text-slate-500">AI Story Model</div><div className="text-xs text-slate-500">{selected.description}</div></div>
       </div>
-      <select aria-label="AI Story Model" value={model} onChange={(event)=>void changeModel(event.target.value)} className="min-w-[240px] rounded-xl border border-white/10 bg-[#11141c] px-3 py-2.5 text-sm outline-none focus:border-violet-500/60">
+      <select aria-label="AI Story Model" value={model} onChange={(event)=>void changeModel(event.target.value)} className="min-w-[240px] rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none shadow-sm focus:border-violet-500/60">
         {STORY_ANALYSIS_MODEL_OPTIONS.map((option)=><option key={option.value} value={option.value}>{option.label}</option>)}
       </select>
     </div>
