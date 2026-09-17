@@ -1,3 +1,30 @@
 @import "tailwindcss";
-:root{--bg:#07080b;--panel:#11141b;--border:#262b36;--text:#f5f7fb;--muted:#8c95a8}
-*{box-sizing:border-box}html{color-scheme:dark}body{margin:0;background:radial-gradient(circle at 10% -10%,rgba(139,92,246,.18),transparent 30rem),radial-gradient(circle at 90% 0%,rgba(34,211,238,.08),transparent 30rem),var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif}button,input,textarea,select{font:inherit}.panel{background:linear-gradient(180deg,rgba(21,24,33,.96),rgba(12,14,19,.96));border:1px solid var(--border);box-shadow:0 18px 50px rgba(0,0,0,.22)}.gridbg{background-image:linear-gradient(rgba(255,255,255,.018) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.018) 1px,transparent 1px);background-size:28px 28px}
+
+:root{--bg:#f8fafc;--panel:#ffffff;--border:#e2e8f0;--text:#18181b;--muted:#64748b}
+*{box-sizing:border-box}
+html{color-scheme:light}
+body{margin:0;background:radial-gradient(circle at 8% -8%,rgba(139,92,246,.09),transparent 30rem),radial-gradient(circle at 92% 0%,rgba(14,165,233,.05),transparent 28rem),var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif}
+button,input,textarea,select{font:inherit}
+input,textarea,select{color:#18181b}
+select option{background:#fff;color:#18181b}
+.panel{background:#fff;border:1px solid var(--border);box-shadow:0 12px 34px rgba(15,23,42,.07)}
+.gridbg{background-image:linear-gradient(rgba(15,23,42,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(15,23,42,.025) 1px,transparent 1px);background-size:28px 28px}
+
+/* Manga Studio originally shipped with hard-coded dark Tailwind utilities.
+   Keep its layout/spacing, but remap the old surfaces to a clean light UI. */
+[class*="bg-[#080a0f]"]{background-color:#f8fafc!important}
+[class*="bg-[#0d1017]"],[class*="bg-[#0b0d13]"],[class*="bg-[#11141c]"]{background-color:#fff!important}
+[class*="bg-black/25"],[class*="bg-black/20"]{background-color:#f8fafc!important}
+[class*="bg-white/5"],[class*="bg-white/8"]{background-color:#f1f5f9!important}
+[class*="border-white/10"],[class*="border-white/8"]{border-color:#e2e8f0!important}
+[class*="text-zinc-100"]{color:#18181b!important}
+[class*="text-zinc-200"],[class*="text-zinc-300"]{color:#334155!important}
+[class*="text-zinc-400"]{color:#475569!important}
+[class*="text-zinc-500"],[class*="text-zinc-600"]{color:#64748b!important}
+[class*="text-violet-300"]{color:#6d28d9!important}
+[class*="text-cyan-300"]{color:#0e7490!important}
+[class*="text-emerald-300"]{color:#047857!important}
+[class*="text-amber-200"]{color:#a16207!important}
+[class*="text-red-300"]{color:#b91c1c!important}
+textarea,input,select{background-color:#fff!important;border-color:#e2e8f0!important}
+textarea:focus,input:focus,select:focus{border-color:#8b5cf6!important;box-shadow:0 0 0 3px rgba(139,92,246,.08)}
