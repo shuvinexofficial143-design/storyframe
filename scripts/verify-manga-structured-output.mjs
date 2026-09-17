@@ -152,7 +152,25 @@ try{
   assert.equal(recovered.fallbackUsed,false);
   if(oldKey===undefined)delete process.env.XKIRO_API_KEY;else process.env.XKIRO_API_KEY=oldKey;
 
-  console.log("Manga structured-output, one-page-at-a-time pacing and Vertex-backoff regression checks passed.");
+  const typeSource=fs.readFileSync(path.join(root,"lib/manga-production/types.ts"),"utf8");
+  const presetSource=fs.readFileSync(path.join(root,"lib/manga-production/presets.ts"),"utf8");
+  const composerSource=fs.readFileSync(path.join(root,"lib/manga-production/full-page-composer.ts"),"utf8");
+  const studioSource=fs.readFileSync(path.join(root,"components/manga-page-production-studio.tsx"),"utf8");
+  const queueSource=fs.readFileSync(path.join(root,"lib/manga-production/image-request-queue.ts"),"utf8");
+  const chapterContinuitySource=fs.readFileSync(path.join(root,"lib/manga-production/chapter-continuity.ts"),"utf8");
+  assert.match(typeSource,/"Full Color Manga"/);
+  assert.match(presetSource,/COLOR MODE: FULL COLOR/);
+  assert.match(presetSource,/no monochrome-only page/);
+  assert.match(composerSource,/isBlackAndWhiteMangaStyle\(stylePreset\)\?"grayscale\(1\) contrast\(1\.04\)":"none"/);
+  assert.match(studioSource,/New Chapter/);
+  assert.match(studioSource,/getPreviousRenderedMangaPage/);
+  assert.match(studioSource,/requestQueuedMangaImage/);
+  assert.match(studioSource,/filter\(\(page\)=>!page\.composedImageDataUrl\)/);
+  assert.match(queueSource,/DEFAULT_IMAGE_REQUEST_INTERVAL_MS=12_000/);
+  assert.match(queueSource,/20_000,40_000,60_000/);
+  assert.match(chapterContinuitySource,/previous chapter ending/i);
+
+  console.log("Manga structured-output, one-page pacing, color-style, chapter-continuity and quota-queue regression checks passed.");
 }finally{
   fs.rmSync(tempDir,{recursive:true,force:true});
 }
