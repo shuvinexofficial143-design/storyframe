@@ -1,6 +1,6 @@
 import {NextResponse} from "next/server";
 import {z} from "zod";
-import {generateImageWithFallback} from "@/lib/image-providers";
+import {generateImageWithFallback,isRetryableImageProviderFailure} from "@/lib/image-providers";
 
 const Input=z.object({
   name:z.string().min(1).max(120),
@@ -17,6 +17,8 @@ const VIEW_PROMPT={
   sheet:"One clean character model sheet showing the SAME character in four separated reference views: front portrait, three-quarter view, side profile and full-body neutral standing pose. Keep facial identity, hairstyle, age, body proportions, costume and accessories identical across all four views. Plain light background, no labels or text."
 } as const;
 
+export const maxDuration=120;
+
 export async function POST(request:Request){
   try{
     const parsed=Input.safeParse(await request.json());
@@ -30,11 +32,16 @@ export async function POST(request:Request){
       "This is a master StoryFrame identity asset, not a story scene. Make the face distinctive and repeatable. Preserve exact facial structure, eye color, hairstyle, apparent age, body proportions, costume silhouette, colors and signature accessories. No dialogue, captions, labels, watermark, logo or UI."
     ].join(" ");
     const sheet=view==="sheet";
-    const result=await generateImageWithFallback({prompt,seed,width:sheet?896:512,height:sheet?1024:512,referenceImages:[]});
+    const result=await generateImageWithFallback({prompt,seed,width:sheet?896:512,height:sheet?1024:512,referenceImages:[],allowFallback:false});
 
     return NextResponse.json({imageDataUrl:result.imageDataUrl,sourceUrl:result.sourceUrl||result.imageDataUrl,model:result.model,provider:result.provider,seed:result.seed,view,capabilities:result.capabilities,fallbackUsed:result.fallbackUsed||false,primaryError:result.primaryError,warning:result.warning});
   }catch(error){
     console.error("Continuity character reference generation failed",error);
-    return NextResponse.json({error:error instanceof Error?error.message:"Character reference generation failed"},{status:502});
+    const message=error instanceof Error?error.message:"Character reference generation failed";
+    if(isRetryableImageProviderFailure(error)){
+      const quota=/\b429\b|resource exhausted|quota|rate limit|too many requests/i.test(message);
+      return NextResponse.json({error:message,retryable:true,retryAfterMs:quota?20_000:10_000},{status:quota?429:503});
+    }
+    return NextResponse.json({error:message},{status:502});
   }
 }

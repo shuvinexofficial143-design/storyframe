@@ -2,6 +2,7 @@ import type {MangaPacingPreset} from "./pacing-policy";
 
 export const MANGA_STYLE_PRESETS=[
   "Classic Black & White Manga",
+  "Full Color Manga",
   "Shonen Manga",
   "Dark Seinen Manga",
   "Shojo Manga",

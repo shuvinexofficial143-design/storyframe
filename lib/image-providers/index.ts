@@ -132,7 +132,7 @@ async function executeProvider(provider:ImageProvider,input:ImageGenerationInput
   };
 }
 
-function isRetryableProviderFailure(error:unknown){
+export function isRetryableImageProviderFailure(error:unknown){
   if(!(error instanceof Error))return false;
   return /\b429\b|resource exhausted|quota|rate limit|too many requests|temporar(?:y|ily) unavailable|\b50[0234]\b|timed out|timeout/i.test(error.message);
 }
@@ -141,7 +141,7 @@ async function executePreferredWithRetry(provider:ImageProvider,input:ImageGener
   try{
     return await executeProvider(provider,input);
   }catch(firstError){
-    if(provider.id!=="gemini"||!isRetryableProviderFailure(firstError))throw firstError;
+    if(provider.id!=="gemini"||!isRetryableImageProviderFailure(firstError))throw firstError;
     let lastError:unknown=firstError;
     for(const delayMs of GEMINI_IMAGE_RETRY_DELAYS_MS){
       console.warn("Gemini image generation temporarily unavailable; retrying after backoff.",{delayMs,error:lastError instanceof Error?lastError.message:String(lastError)});
@@ -150,7 +150,7 @@ async function executePreferredWithRetry(provider:ImageProvider,input:ImageGener
         return await executeProvider(provider,input);
       }catch(error){
         lastError=error;
-        if(!isRetryableProviderFailure(error))throw error;
+        if(!isRetryableImageProviderFailure(error))throw error;
       }
     }
     throw lastError;
@@ -164,6 +164,7 @@ export async function generateImageWithFallback(input:ImageGenerationInput):Prom
   try{
     return await executePreferredWithRetry(desired,input);
   }catch(error){
+    if(input.allowFallback===false)throw error;
     const primaryError=error instanceof Error?error.message:"Primary provider failed";
     const fallback=await executeProvider(pollinationsImageProvider,{...input,model:pollinationsImageProvider.defaultModel,referenceImages:[]});
     return {...fallback,fallbackUsed:true,primaryError,warning:`${desired.name} primary generation was unavailable after retrying, so StoryFrame used Pollinations flux-anime fallback. ${primaryError}`};

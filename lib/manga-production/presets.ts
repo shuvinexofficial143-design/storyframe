@@ -2,14 +2,32 @@ import type {MangaStylePreset} from "./types";
 
 export const MANGA_STYLE_PROMPTS:Record<MangaStylePreset,string>={
   "Classic Black & White Manga":"professional black-and-white manga, clean ink linework, screentone shading, cross-hatching, strong black shadows, clean white negative space, expressive manga faces, detailed manga backgrounds, professional serialized manga quality",
-  "Shonen Manga":"professional black-and-white shonen manga, energetic clean ink linework, dynamic anatomy, bold speed lines, strong impact frames, crisp screentones, expressive reactions, readable action staging, serialized weekly manga quality",
-  "Dark Seinen Manga":"professional black-and-white seinen manga, mature realistic anatomy, dense cross-hatching, deep black shadows, restrained screentones, cinematic contrast, detailed environments, grounded facial acting, premium serialized manga quality",
-  "Shojo Manga":"professional black-and-white shojo manga, elegant clean linework, expressive eyes, delicate screentone gradients, emotional close-ups, graceful composition, selective floral or light motifs only when story-appropriate, polished serialized manga quality",
-  "Horror Manga":"professional black-and-white horror manga, precise ink linework, unsettling cross-hatching, harsh black shadows, oppressive negative space, disturbing but story-faithful framing, detailed environments, tense close-ups, serialized horror manga quality",
-  "Cinematic Realistic Manga":"professional black-and-white realistic manga, highly detailed ink drawing, realistic anatomy and perspective, controlled screentone shading, film-like composition, strong blacks, subtle cross-hatching, believable environments, premium graphic-novel manga quality"
+  "Full Color Manga":"professional full-color manga page, rich but controlled anime color palette, consistent skin tones and costume colors, cinematic lighting, detailed colored backgrounds, crisp linework, polished serialized manga quality",
+  "Shonen Manga":"professional full-color shonen manga, energetic clean linework, dynamic anatomy, bold impact framing, vivid controlled colors, consistent character palette, expressive reactions, readable action staging, premium serialized manga quality",
+  "Dark Seinen Manga":"professional full-color seinen manga, mature realistic anatomy, deep cinematic shadows, restrained sophisticated color palette, realistic skin and material colors, detailed environments, grounded facial acting, premium graphic-novel quality",
+  "Shojo Manga":"professional full-color shojo manga, elegant clean linework, expressive eyes, soft luminous color palette, emotional close-ups, graceful composition, selective floral or light motifs only when story-appropriate, polished serialized manga quality",
+  "Horror Manga":"professional full-color horror manga, precise linework, ominous low-key color palette, unsettling colored lighting, oppressive shadows, disturbing but story-faithful framing, detailed environments, tense close-ups, premium horror manga quality",
+  "Cinematic Realistic Manga":"professional full-color realistic manga, highly detailed drawing, realistic anatomy and perspective, natural material colors, film-like color grading and composition, believable environments, premium cinematic graphic-novel quality"
 };
 
-export const MANGA_NEGATIVE_PROMPT="no colored anime art, no anime screenshot, no 3D render, no game art, no cartoon poster, no painterly color illustration, no random redesign, no face change, no hairstyle change, no age change, no outfit change unless story-authorized, no location-layout change, no duplicate main character, no random props, no skipped action, no unrelated scene, no rendered text, no captions, no speech bubbles, no letters, no logos, no watermark, no malformed anatomy, no extra limbs";
+const COMMON_NEGATIVE="no anime screenshot, no 3D render, no game art, no cartoon poster, no random redesign, no face change, no hairstyle change, no age change, no outfit change unless story-authorized, no location-layout change, no duplicate main character, no random props, no skipped action, no unrelated scene, no rendered text, no captions, no speech bubbles, no letters, no logos, no watermark, no malformed anatomy, no extra limbs";
+export const MANGA_NEGATIVE_PROMPT=COMMON_NEGATIVE;
+
+export function isBlackAndWhiteMangaStyle(style:MangaStylePreset){
+  return style==="Classic Black & White Manga";
+}
+
+export function getMangaNegativePrompt(style:MangaStylePreset){
+  return isBlackAndWhiteMangaStyle(style)
+    ?`${COMMON_NEGATIVE}, no colored artwork, no full-color rendering, no painterly color illustration`
+    :`${COMMON_NEGATIVE}, no monochrome-only page, no grayscale-only rendering, no black-and-white-only screentone page, no washed-out desaturated palette`;
+}
+
+export function mangaColorInstruction(style:MangaStylePreset){
+  return isBlackAndWhiteMangaStyle(style)
+    ?"COLOR MODE: BLACK AND WHITE ONLY. Use ink, screentone, grayscale and black shadows; do not introduce color."
+    :"COLOR MODE: FULL COLOR. Preserve stable character skin tones, hair colors, eye colors, costume colors, prop colors and recurring environment palette across every panel and page. Do not convert the artwork to grayscale.";
+}
 
 export type LayoutSlot={x:number;y:number;width:number;height:number;emphasis:"normal"|"large"};
 export type MangaPageLayout={id:string;label:string;panelCount:3|4|5;slots:LayoutSlot[]};
