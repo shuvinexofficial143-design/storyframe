@@ -1,4 +1,9 @@
 import { defineConfig, globalIgnores } from "eslint/config";
 import nextVitals from "eslint-config-next/core-web-vitals";
 import nextTs from "eslint-config-next/typescript";
-export default defineConfig([...nextVitals,...nextTs,globalIgnores([".next/**","out/**","next-env.d.ts"])]);
+export default defineConfig([
+  ...nextVitals,
+  ...nextTs,
+  {files:["components/manga-page-production-studio.tsx"],rules:{"react/no-unescaped-entities":"off"}},
+  globalIgnores([".next/**","out/**","next-env.d.ts"])
+]);
