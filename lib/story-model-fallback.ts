@@ -16,6 +16,7 @@ export async function withStoryModelFallback<T>(input:{
   model:StoryAnalysisModel;
   run:(model:StoryAnalysisModel)=>Promise<T>;
   sleep?:(ms:number)=>Promise<void>;
+  retryDelaysMs?:readonly number[];
 }){
   try{
     return {data:await input.run(input.model),model:input.model,fallbackUsed:false};
@@ -23,9 +24,10 @@ export async function withStoryModelFallback<T>(input:{
     if(!isVertexStoryAnalysisModel(input.model)||!isRetryableVertexStoryFailure(firstError))throw firstError;
 
     const sleep=input.sleep||defaultSleep;
+    const retryDelays=input.retryDelaysMs??VERTEX_STORY_RETRY_DELAYS_MS;
     let lastError:unknown=firstError;
 
-    for(const delayMs of VERTEX_STORY_RETRY_DELAYS_MS){
+    for(const delayMs of retryDelays){
       console.warn("Vertex story model temporarily unavailable; retrying primary model after backoff.",{primaryModel:input.model,delayMs,error:lastError instanceof Error?lastError.message:String(lastError)});
       await sleep(delayMs);
       try{
