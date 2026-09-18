@@ -158,6 +158,8 @@ try{
   const studioSource=fs.readFileSync(path.join(root,"components/manga-page-production-studio.tsx"),"utf8");
   const queueSource=fs.readFileSync(path.join(root,"lib/manga-production/image-request-queue.ts"),"utf8");
   const chapterContinuitySource=fs.readFileSync(path.join(root,"lib/manga-production/chapter-continuity.ts"),"utf8");
+  const workspaceSource=fs.readFileSync(path.join(root,"components/storyframe-workspace.tsx"),"utf8");
+  const homePageSource=fs.readFileSync(path.join(root,"app/page.tsx"),"utf8");
   assert.match(typeSource,/"Full Color Manga"/);
   assert.match(presetSource,/COLOR MODE: FULL COLOR/);
   assert.match(presetSource,/no monochrome-only page/);
@@ -169,6 +171,10 @@ try{
   assert.match(queueSource,/DEFAULT_IMAGE_REQUEST_INTERVAL_MS=12_000/);
   assert.match(queueSource,/20_000,40_000,60_000/);
   assert.match(chapterContinuitySource,/previous chapter ending/i);
+  assert.match(studioSource,/fetch\("\/api\/manga\/production-plan"/);
+  assert.match(studioSource,/storyframe-manga-background-run:/);
+  assert.doesNotMatch(workspaceSource,/DurableMangaBuildShell/);
+  assert.match(homePageSource,/force-dynamic/);
 
   console.log("Manga structured-output, one-page pacing, color-style, chapter-continuity and quota-queue regression checks passed.");
 }finally{
