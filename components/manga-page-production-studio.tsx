@@ -53,6 +53,17 @@ export function MangaPageProductionStudio(){
   };
 
   useEffect(()=>{
+    try{
+      const staleKeys:string[]=[];
+      for(let index=0;index<localStorage.length;index+=1){
+        const key=localStorage.key(index);
+        if(key?.startsWith("storyframe-manga-background-run:"))staleKeys.push(key);
+      }
+      staleKeys.forEach((key)=>localStorage.removeItem(key));
+    }catch{}
+  },[]);
+
+  useEffect(()=>{
     let cancelled=false;
     loadStudioState().then((saved)=>{
       if(!cancelled&&saved?.projects?.length){stateRef.current=saved;setState(saved)}
