@@ -7,7 +7,7 @@ import {calculatePlannedCoverage} from "@/lib/manga-production/validators";
 import {deriveSeed} from "@/lib/continuity/seed";
 import {isVertexStoryAnalysisModel,storyAnalysisProviderLabel,type StoryAnalysisModel} from "@/lib/story-analysis-models";
 import {withStoryModelFallback} from "@/lib/story-model-fallback";
-import type {MangaPacingPreset} from "@/lib/manga-production/pacing-policy";
+import {partitionPlanningChunkCounts,type MangaPacingPreset} from "@/lib/manga-production/pacing-policy";
 import type {MangaChapterProduction,MangaContinuityState,MangaMasterAnalysis,MangaPage,MangaStylePreset} from "@/lib/manga-production/types";
 
 export type MangaBackgroundBuildInput={
@@ -26,7 +26,13 @@ export type MangaBackgroundBuildInput={
   chapterContext?:string;
 };
 
-export type MangaBackgroundBuildResult={master:MangaMasterAnalysis;production:MangaChapterProduction};
+export type MangaBackgroundBuildResult=
+  |{ok:true;master:MangaMasterAnalysis;production:MangaChapterProduction}
+  |{ok:false;stage:string;error:string};
+
+function workflowError(error:unknown){
+  return error instanceof Error?error.message:String(error||"Unknown background manga build error");
+}
 
 function providerLabel(model:StoryAnalysisModel,fallbackUsed:boolean,pacing:MangaPacingPreset){
   return `${storyAnalysisProviderLabel(model)}${fallbackUsed?" · automatic fallback from Gemini 3.1 Pro":""} · adaptive ${pacing.toLowerCase()} pacing`;
@@ -86,7 +92,12 @@ function seedPages(masterSeed:number,pages:MangaPage[]){
 export async function buildMangaChapterWorkflow(input:MangaBackgroundBuildInput):Promise<MangaBackgroundBuildResult>{
   "use workflow";
 
-  const analyzed=await analyzeMasterStep(input);
+  let analyzed:Awaited<ReturnType<typeof analyzeMasterStep>>;
+  try{
+    analyzed=await analyzeMasterStep(input);
+  }catch(error){
+    return {ok:false,stage:"Story analysis",error:workflowError(error)};
+  }
   const master=analyzed.master;
   const previous=input.previousContinuity||null;
   const inheritedCharacters=previous?{...master.initialCharacterStates,...previous.characters}:master.initialCharacterStates;
@@ -110,23 +121,35 @@ export async function buildMangaChapterWorkflow(input:MangaBackgroundBuildInput)
   while(nextBeatIndex<master.beats.length){
     guard+=1;
     if(guard>Math.max(12,master.beats.length+2))throw new Error("Background manga planning stopped because the planner did not finish the remaining beats.");
+    const remaining=master.beats.length-nextBeatIndex;
+    const nextPageBeatCount=partitionPlanningChunkCounts(remaining,input.pacingPreset)[0];
+    const pageNumber=(pages.at(-1)?.pageNumber||0)+1;
+    if(!nextPageBeatCount)return {ok:false,stage:`Page ${pageNumber} planning`,error:"Could not derive the next 3-5 beat page group."};
+    const pageBeats=master.beats.slice(nextBeatIndex,nextBeatIndex+nextPageBeatCount);
     if(isVertexStoryAnalysisModel(analyzed.model))await sleep("12 seconds");
-    const planned=await planOnePageStep({
-      analysisModel:analyzed.model,
-      pacingPreset:input.pacingPreset,
-      stylePreset:input.stylePreset,
-      storySummary,
-      beats:master.beats,
-      startBeatIndex:nextBeatIndex,
-      pageStartNumber:(pages.at(-1)?.pageNumber||0)+1,
-      previousState:continuityState,
-      characters:plannerCharacters,
-      locations:master.locations,
-      props:master.props
-    });
-    if(planned.nextBeatIndex<=nextBeatIndex)throw new Error("Background manga planner made no progress.");
+    let planned:Awaited<ReturnType<typeof planOnePageStep>>;
+    try{
+      planned=await planOnePageStep({
+        analysisModel:analyzed.model,
+        pacingPreset:input.pacingPreset,
+        stylePreset:input.stylePreset,
+        storySummary,
+        beats:pageBeats,
+        startBeatIndex:0,
+        pageStartNumber:pageNumber,
+        previousState:continuityState,
+        characters:plannerCharacters,
+        locations:master.locations,
+        props:master.props
+      });
+    }catch(error){
+      return {ok:false,stage:`Page ${pageNumber} planning`,error:workflowError(error)};
+    }
+    if(planned.nextBeatIndex!==pageBeats.length){
+      return {ok:false,stage:`Page ${pageNumber} planning`,error:`Planner consumed ${planned.nextBeatIndex}/${pageBeats.length} beats; the queue stopped before skipping anything.`};
+    }
     pages=[...pages,...seedPages(input.masterSeed,planned.pages)];
-    nextBeatIndex=planned.nextBeatIndex;
+    nextBeatIndex+=pageBeats.length;
     continuityState=planned.continuityState;
   }
 
@@ -148,5 +171,5 @@ export async function buildMangaChapterWorkflow(input:MangaBackgroundBuildInput)
     updatedAt:input.requestedAt
   };
 
-  return {master,production};
+  return {ok:true,master,production};
 }

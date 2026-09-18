@@ -13,7 +13,8 @@ const wait=(ms:number)=>new Promise<void>((resolve)=>setTimeout(resolve,ms));
 
 type PendingRun={runId:string;projectId:string;chapterId:string;chapterTitle:string;startedAt:string};
 type StartResponse={runId?:string;status?:string;error?:string};
-type StatusResponse={status?:string;result?:{master:MangaMasterAnalysis;production:MangaChapterProduction};error?:string};
+type BackgroundResult={ok?:boolean;master?:MangaMasterAnalysis;production?:MangaChapterProduction;stage?:string;error?:string};
+type StatusResponse={status?:string;result?:BackgroundResult;error?:string};
 
 function runKey(projectId:string,chapterId:string){return `${RUN_PREFIX}${projectId}:${chapterId}`}
 
@@ -125,12 +126,21 @@ export function DurableMangaBuildShell({children}:{children:ReactNode}){
         const data=await response.json().catch(()=>({error:"Background build status returned invalid data."})) as StatusResponse;
         if(!response.ok)throw new Error(data.error||`Background build status failed (${response.status}).`);
         if(data.status==="completed"&&data.result){
-          await applyCompletedRun(record,data.result);
-          continue;
+          if(data.result.ok===false||data.result.error){
+            try{localStorage.removeItem(runKey(record.projectId,record.chapterId))}catch{}
+            const stage=data.result.stage?`${data.result.stage}: `:"";
+            setRunningCount((count)=>Math.max(0,count-1));
+            setError(`${record.chapterTitle} background build stopped. ${stage}${data.result.error||"Unknown server error"} · Run ${record.runId}`);
+            continue;
+          }
+          if(data.result.master&&data.result.production){
+            await applyCompletedRun(record,{master:data.result.master,production:data.result.production});
+            continue;
+          }
         }
         if(data.status==="failed"||data.status==="cancelled"){
           try{localStorage.removeItem(runKey(record.projectId,record.chapterId))}catch{}
-          setError(`${record.chapterTitle} background build stopped on the server. ${data.error||"Press Build Manga Script & Pages to retry."}`);
+          setError(`${record.chapterTitle} background build stopped on the server. ${data.error||"Press Build Manga Script & Pages to retry."} · Run ${record.runId}`);
           continue;
         }
         setMessage(`${record.chapterTitle} is building on the server. You can close this website; the durable workflow will continue.`);
