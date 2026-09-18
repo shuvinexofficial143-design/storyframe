@@ -34,6 +34,26 @@ function readPendingRuns(){
   return runs;
 }
 
+function compactExistingCharacter(character:Record<string,unknown>){
+  const rest={...character};
+  delete rest.manualReferenceImage;
+  delete rest.referenceImages;
+  delete rest.states;
+  return rest;
+}
+
+function compactExistingLocation(location:Record<string,unknown>){
+  const rest={...location};
+  delete rest.referenceImages;
+  return rest;
+}
+
+function compactExistingObject(item:Record<string,unknown>){
+  const rest={...item};
+  delete rest.referenceImages;
+  return rest;
+}
+
 function selectedPacingFromPage():MangaPacingPreset{
   if(typeof document==="undefined")return "Balanced";
   const select=[...document.querySelectorAll("select")].find((item)=>item.selectedOptions[0]?.textContent?.startsWith("Beat Detail:"));
@@ -110,7 +130,7 @@ export function DurableMangaBuildShell({children}:{children:ReactNode}){
         }
         if(data.status==="failed"||data.status==="cancelled"){
           try{localStorage.removeItem(runKey(record.projectId,record.chapterId))}catch{}
-          setError(`${record.chapterTitle} background build stopped on the server. Press Build Manga Script & Pages to retry.`);
+          setError(`${record.chapterTitle} background build stopped on the server. ${data.error||"Press Build Manga Script & Pages to retry."}`);
           continue;
         }
         setMessage(`${record.chapterTitle} is building on the server. You can close this website; the durable workflow will continue.`);
@@ -162,9 +182,9 @@ export function DurableMangaBuildShell({children}:{children:ReactNode}){
           pacingPreset,
           masterSeed:project.visualBible.masterSeed,
           requestedAt:new Date().toISOString(),
-          existingCharacters:project.characters,
-          existingLocations:project.locations,
-          existingProps:project.props,
+          existingCharacters:project.characters.map((item)=>compactExistingCharacter(item as unknown as Record<string,unknown>)),
+          existingLocations:project.locations.map((item)=>compactExistingLocation(item as unknown as Record<string,unknown>)),
+          existingProps:project.props.map((item)=>compactExistingObject(item as unknown as Record<string,unknown>)),
           previousContinuity:getPreviousChapterContinuity(project,chapter.id),
           chapterContext:continuationContextText(project,chapter.id)
         })
