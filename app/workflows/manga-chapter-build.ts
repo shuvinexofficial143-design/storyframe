@@ -36,7 +36,6 @@ async function analyzeMasterStep(input:MangaBackgroundBuildInput){
   "use step";
   const result=await withStoryModelFallback({
     model:input.analysisModel,
-    retryDelaysMs:[],
     run:async(model)=>{
       const masterInput={
         projectName:input.projectName,
@@ -111,9 +110,9 @@ export async function buildMangaChapterWorkflow(input:MangaBackgroundBuildInput)
   while(nextBeatIndex<master.beats.length){
     guard+=1;
     if(guard>Math.max(12,master.beats.length+2))throw new Error("Background manga planning stopped because the planner did not finish the remaining beats.");
-    if(isVertexStoryAnalysisModel(input.analysisModel))await sleep("12 seconds");
+    if(isVertexStoryAnalysisModel(analyzed.model))await sleep("12 seconds");
     const planned=await planOnePageStep({
-      analysisModel:input.analysisModel,
+      analysisModel:analyzed.model,
       pacingPreset:input.pacingPreset,
       stylePreset:input.stylePreset,
       storySummary,
