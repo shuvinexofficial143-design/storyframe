@@ -158,6 +158,9 @@ try{
   const studioSource=fs.readFileSync(path.join(root,"components/manga-page-production-studio.tsx"),"utf8");
   const queueSource=fs.readFileSync(path.join(root,"lib/manga-production/image-request-queue.ts"),"utf8");
   const chapterContinuitySource=fs.readFileSync(path.join(root,"lib/manga-production/chapter-continuity.ts"),"utf8");
+  const backgroundWorkflowSource=fs.readFileSync(path.join(root,"app/workflows/manga-chapter-build.ts"),"utf8");
+  const durableShellSource=fs.readFileSync(path.join(root,"components/durable-manga-build-shell.tsx"),"utf8");
+  const packageSource=fs.readFileSync(path.join(root,"package.json"),"utf8");
   assert.match(typeSource,/"Full Color Manga"/);
   assert.match(presetSource,/COLOR MODE: FULL COLOR/);
   assert.match(presetSource,/no monochrome-only page/);
@@ -169,6 +172,12 @@ try{
   assert.match(queueSource,/DEFAULT_IMAGE_REQUEST_INTERVAL_MS=12_000/);
   assert.match(queueSource,/20_000,40_000,60_000/);
   assert.match(chapterContinuitySource,/previous chapter ending/i);
+  assert.match(backgroundWorkflowSource,/partitionPlanningChunkCounts/);
+  assert.match(backgroundWorkflowSource,/beats:pageBeats/);
+  assert.match(backgroundWorkflowSource,/startBeatIndex:0/);
+  assert.match(backgroundWorkflowSource,/ok:false,stage:/);
+  assert.match(durableShellSource,/Run \$\{record\.runId\}/);
+  assert.match(packageSource,/"workflow":"4\.8\.9"/);
 
   console.log("Manga structured-output, one-page pacing, color-style, chapter-continuity and quota-queue regression checks passed.");
 }finally{
