@@ -35,17 +35,22 @@ function readPendingRuns(){
 }
 
 function compactExistingCharacter(character:Record<string,unknown>){
-  const {manualReferenceImage:_manualReferenceImage,referenceImages:_referenceImages,states:_states,...rest}=character;
+  const rest={...character};
+  delete rest.manualReferenceImage;
+  delete rest.referenceImages;
+  delete rest.states;
   return rest;
 }
 
 function compactExistingLocation(location:Record<string,unknown>){
-  const {referenceImages:_referenceImages,...rest}=location;
+  const rest={...location};
+  delete rest.referenceImages;
   return rest;
 }
 
 function compactExistingObject(item:Record<string,unknown>){
-  const {referenceImages:_referenceImages,...rest}=item;
+  const rest={...item};
+  delete rest.referenceImages;
   return rest;
 }
 
