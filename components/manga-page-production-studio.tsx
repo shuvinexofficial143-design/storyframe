@@ -16,6 +16,7 @@ import {MANGA_STYLE_PRESETS,type MangaChapterProduction,type MangaMasterAnalysis
 import {downloadDataUrl} from "@/lib/manga-production/composer";
 import {continuationContextText,getInheritedMangaStyle,getPreviousChapterContinuity,getPreviousRenderedMangaPage} from "@/lib/manga-production/chapter-continuity";
 import {requestQueuedMangaImage} from "@/lib/manga-production/image-request-queue";
+import {StoryGeneratorWorkspace,type StoryGeneratorView} from "./story-generator-workspace";
 
 const now=()=>new Date().toISOString();
 const wait=(ms:number)=>new Promise<void>((resolve)=>setTimeout(resolve,ms));
@@ -30,7 +31,7 @@ type ImageResponse={imageDataUrl:string;sourceUrl?:string;model:string;provider:
 type ReferenceResponse={imageDataUrl:string;sourceUrl:string;model:string;provider:string;seed:number;warning?:string};
 type MasterResponse={kind:"master";data:MangaMasterAnalysis};
 type PagesResponse={kind:"pages";data:MangaPagePlan};
-type Tab="story"|"characters"|"locations"|"script"|"pages"|"export"|"download";
+type Tab="generator"|"generated-chapters"|"chapter-explainer"|"story"|"characters"|"locations"|"script"|"pages"|"export"|"download";
 type ReferenceView="primary"|"full-body"|"three-quarter"|"side"|"sheet";
 type StoryGeneratorCommand={
   requestId:string;
@@ -45,7 +46,7 @@ type StoryGeneratorCommand={
   autoGenerateImages:boolean;
   syncOnly?:boolean;
 };
-type ActiveStoryGeneratorCommand=StoryGeneratorCommand&{projectId:string;chapterId:string;phase:"build"|"images"};
+type ActiveStoryGeneratorCommand=StoryGeneratorCommand&{projectId:string;chapterId:string;phase:"build"|"planning"|"images"};
 
 const beatDetailLabel=(preset:MangaPacingPreset)=>preset==="Fast"?"Low":preset==="Balanced"?"Standard":"Highest";
 
@@ -53,7 +54,7 @@ export function MangaPageProductionStudio(){
   const [state,setState]=useState<MangaStudioState>(()=>{const p=createProject("My Manga Project");return {activeProjectId:p.id,projects:[p]}});
   const stateRef=useRef(state);
   const [hydrated,setHydrated]=useState(false);
-  const [tab,setTab]=useState<Tab>("story");
+  const [tab,setTab]=useState<Tab>("generator");
   const [busy,setBusy]=useState("");
   const [progress,setProgress]=useState("");
   const [notice,setNotice]=useState("");
@@ -118,11 +119,20 @@ export function MangaPageProductionStudio(){
       }
 
       const existingProduction=targetChapter.manga;
+      if(existingProduction?.pages.length&&existingProduction.nextBeatIndex>=existingProduction.beats.length&&existingProduction.pages.every((page)=>Boolean(page.composedImageDataUrl))){
+        sendResult({requestId:detail.requestId,ok:true,projectId:targetProject.id,chapterId:targetChapter.id,message:`Chapter ${detail.chapterNumber} manga is already complete.`});
+        return;
+      }
+      const phase:ActiveStoryGeneratorCommand["phase"]=!existingProduction
+        ?"build"
+        :existingProduction.nextBeatIndex<existingProduction.beats.length
+          ?"planning"
+          :"images";
       storyGeneratorCommandRef.current={
         ...detail,
         projectId:targetProject.id,
         chapterId:targetChapter.id,
-        phase:existingProduction?.pages.length&&existingProduction.nextBeatIndex>=existingProduction.beats.length?"images":"build"
+        phase
       };
     };
     window.addEventListener("storyframe:story-generator-command",handler);
@@ -503,8 +513,44 @@ export function MangaPageProductionStudio(){
     if(command.phase==="build"){
       await buildManga();
       const latest=stateRef.current.projects.find((item)=>item.id===command.projectId)?.chapters.find((item)=>item.id===command.chapterId)?.manga;
-      if(!latest||!latest.beats.length||latest.nextBeatIndex<latest.beats.length||!latest.pages.length){
-        finishStoryGeneratorCommand(false,"Existing Manga Studio analysis/page planning did not complete for this chapter.");
+      if(!latest||!latest.beats.length){
+        finishStoryGeneratorCommand(false,"Existing Manga Studio analysis did not complete for this chapter.");
+        return;
+      }
+      if(latest.nextBeatIndex<latest.beats.length){
+        storyGeneratorCommandRef.current={...command,phase:"planning"};
+        setTimeout(()=>void storyGeneratorRunnerRef.current(),80);
+        return;
+      }
+      if(!latest.pages.length){
+        finishStoryGeneratorCommand(false,"Manga page planning did not create any pages for this chapter.");
+        return;
+      }
+      if(!command.autoGenerateImages){
+        finishStoryGeneratorCommand(true,"Chapter analysis and manga page planning complete.");
+        return;
+      }
+      storyGeneratorCommandRef.current={...command,phase:"images"};
+      setTimeout(()=>void storyGeneratorRunnerRef.current(),80);
+      return;
+    }
+
+    if(command.phase==="planning"){
+      const latestProject=stateRef.current.projects.find((item)=>item.id===command.projectId);
+      const latestChapter=latestProject?.chapters.find((item)=>item.id===command.chapterId);
+      if(!latestProject||!latestChapter?.manga){
+        finishStoryGeneratorCommand(false,"Saved manga planning state was not found. Retry from chapter analysis.");
+        return;
+      }
+      try{
+        await planAllRemainingPages(latestProject,latestChapter.id,latestChapter.manga);
+      }catch(reason){
+        finishStoryGeneratorCommand(false,reason instanceof Error?reason.message:"Manga page planning stopped before completion.");
+        return;
+      }
+      const planned=stateRef.current.projects.find((item)=>item.id===command.projectId)?.chapters.find((item)=>item.id===command.chapterId)?.manga;
+      if(!planned||planned.nextBeatIndex<planned.beats.length||!planned.pages.length){
+        finishStoryGeneratorCommand(false,"Manga page planning did not complete for this chapter.");
         return;
       }
       if(!command.autoGenerateImages){
@@ -596,7 +642,7 @@ export function MangaPageProductionStudio(){
   const plannedChapterPages=chapter.manga?.pages.length||0;
   const generatedProjectPages=project.chapters.reduce((sum,item)=>sum+(item.manga?.pages.filter((page)=>Boolean(page.composedImageDataUrl)).length||0),0);
   const plannedProjectPages=project.chapters.reduce((sum,item)=>sum+(item.manga?.pages.length||0),0);
-  const tabs:[Tab,string][]=[["story","Story"],["characters","Characters"],["locations","Locations"],["script","Manga Script"],["pages","Manga Pages"],["export","Export"],["download","Download All"]];
+  const tabs:[Tab,string][]=[["generator","Story Generator"],["generated-chapters","Chapters"],["chapter-explainer","Chapter Explainer"],["story","Story"],["characters","Characters"],["locations","Locations"],["script","Manga Script"],["pages","Manga Pages"],["export","Export"],["download","Download All"]];
   const building=busy==="master"||busy==="planning";
 
   return <main className="min-h-screen bg-[#080a0f] text-zinc-100">
@@ -620,6 +666,13 @@ export function MangaPageProductionStudio(){
         </div>
         <div className="mt-4 flex gap-2 overflow-x-auto">{tabs.map(([id,label])=><button key={id} onClick={()=>setTab(id)} className={`whitespace-nowrap rounded-xl px-4 py-2 text-sm ${tab===id?"bg-violet-500 text-white":"bg-white/5 text-zinc-400"}`}>{label}</button>)}</div>
       </section>
+
+      <div className={tab==="generator"||tab==="generated-chapters"||tab==="chapter-explainer"?"block":"hidden"}>
+        <StoryGeneratorWorkspace
+          view={(tab==="generated-chapters"?"chapters":tab==="chapter-explainer"?"explainer":"generator") as StoryGeneratorView}
+          onOpenMangaStory={()=>setTab("story")}
+        />
+      </div>
 
       {progress&&<div className="rounded-2xl border border-violet-500/20 bg-violet-500/8 p-4 text-sm text-violet-200"><Loader2 className="mr-2 inline animate-spin" size={15}/>{progress}</div>}
       {notice&&<div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/8 p-4 text-sm text-emerald-200">{notice}</div>}
