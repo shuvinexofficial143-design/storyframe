@@ -195,6 +195,12 @@ try{
   assert.match(storyGeneratorSource,/Generate Story Overview/);
   assert.match(storyGeneratorSource,/Explainer Prompt/);
   assert.match(storyGeneratorSource,/storyframe:story-generator-command/);
+  assert.match(storyGeneratorSource,/onPipelineStage\?\.\("chapters"\)/);
+  assert.match(storyGeneratorSource,/onPipelineStage\?\.\("explainer"\)/);
+  assert.match(storyGeneratorSource,/onPipelineStage\?\.\("story"\)/);
+  assert.match(studioSource,/onPipelineStage=\{\(stage\)=>setTab/);
+  assert.match(studioSource,/setTab\("script"\)/);
+  assert.match(studioSource,/setTab\("pages"\)/);
   assert.match(storyGeneratorApiSource,/Write exactly ONE next chapter/);
   assert.match(storyGeneratorApiSource,/Do not hard-cap chapter count/);
   assert.match(storyGeneratorApiSource,/readableStructuredText/);

@@ -351,6 +351,7 @@ export function MangaPageProductionStudio(){
 
   const buildManga=async()=>{
     if(chapter.story.trim().length<20){setError("पहले पूरी story paste करो।");return}
+    setTab("story");
     const controller=beginCancelableTask();
     setBusy("master");setProgress(`Analyzing story · ${beatDetailLabel(pacingPreset)} beat detail…`);setError("");setNotice("");
     try{
@@ -393,6 +394,7 @@ export function MangaPageProductionStudio(){
       };
       let nextProject:MangaProject={...project,characters:merged.characters,locations:merged.locations,props:merged.props,updatedAt:now(),chapters:project.chapters.map((item)=>item.id===chapter.id?{...item,manga:initialProduction,updatedAt:now()}:item)};
       applyState((current)=>mutateProject(current,project.id,()=>nextProject));
+      setTab("script");
       setProgress(`Story analyzed: ${master.beats.length} visual beats. Planning complete pages…`);
       const planned=await planAllRemainingPages(nextProject,chapter.id,initialProduction,controller.signal);
       nextProject=planned.project;
@@ -409,10 +411,12 @@ export function MangaPageProductionStudio(){
 
   const planNextPages=async()=>{
     if(!production||production.nextBeatIndex>=production.beats.length)return;
+    setTab("script");
     const controller=beginCancelableTask();
     setBusy("planning");setError("");setNotice("");
     try{
       const planned=await planAllRemainingPages(project,chapter.id,production,controller.signal);
+      setTab("pages");
       setNotice(`All remaining pages planned. Coverage ${planned.production.coverage.percent}%.`);
     }catch(reason){
       if(isAbortError(reason))setNotice("Page planning cancelled. Already planned pages were kept.");
@@ -591,12 +595,14 @@ export function MangaPageProductionStudio(){
         finishStoryGeneratorCommand(true,"Chapter analysis and manga page planning complete.");
         return;
       }
+      setTab("pages");
       storyGeneratorCommandRef.current={...command,phase:"images"};
       setTimeout(()=>void storyGeneratorRunnerRef.current(),80);
       return;
     }
 
     if(command.phase==="planning"){
+      setTab("script");
       const latestProject=stateRef.current.projects.find((item)=>item.id===command.projectId);
       const latestChapter=latestProject?.chapters.find((item)=>item.id===command.chapterId);
       if(!latestProject||!latestChapter?.manga){
@@ -628,6 +634,7 @@ export function MangaPageProductionStudio(){
       return;
     }
 
+    setTab("pages");
     await generateAllPages();
     const latest=stateRef.current.projects.find((item)=>item.id===command.projectId)?.chapters.find((item)=>item.id===command.chapterId)?.manga;
     const incomplete=latest?.pages.filter((page)=>!page.composedImageDataUrl)||[];
@@ -741,6 +748,7 @@ export function MangaPageProductionStudio(){
         <StoryGeneratorWorkspace
           view={(tab==="generated-chapters"?"chapters":tab==="chapter-explainer"?"explainer":"generator") as StoryGeneratorView}
           onOpenMangaStory={()=>setTab("story")}
+          onPipelineStage={(stage)=>setTab(stage==="chapters"?"generated-chapters":stage==="explainer"?"chapter-explainer":"story")}
         />
       </div>
 

@@ -36,7 +36,7 @@ function requestId(number:number){return `storygen-${number}-${Date.now().toStri
 
 export type StoryGeneratorView="generator"|"chapters"|"explainer";
 
-export function StoryGeneratorWorkspace({view="generator",onOpenMangaStory}:{view?:StoryGeneratorView;onOpenMangaStory?:()=>void}){
+export function StoryGeneratorWorkspace({view="generator",onOpenMangaStory,onPipelineStage}:{view?:StoryGeneratorView;onOpenMangaStory?:()=>void;onPipelineStage?:(stage:"chapters"|"explainer"|"story")=>void}){
   const [state,setState]=useState<StoryGeneratorState>(()=>initialState());
   const stateRef=useRef(state);
   const [hydrated,setHydrated]=useState(false);
@@ -205,6 +205,7 @@ export function StoryGeneratorWorkspace({view="generator",onOpenMangaStory}:{vie
     if(current.chapters.at(-1)?.storyComplete){update({status:"Story already reached its planned ending.",error:""});return}
 
     const number=current.chapters.length+1;
+    onPipelineStage?.("chapters");
     const controller=beginGeneratorRequest();
     update({running:true,status:`Generating Chapter ${number}…`,error:""});
     try{
@@ -236,6 +237,7 @@ export function StoryGeneratorWorkspace({view="generator",onOpenMangaStory}:{vie
       };
       applyState((value)=>({...value,chapters:[...value.chapters,created],status:`Chapter ${number} saved. Generating explainer…`,updatedAt:now()}));
       setSelectedChapterId(created.id);
+      onPipelineStage?.("explainer");
 
       const latest=stateRef.current;
       let explainer="";
@@ -260,6 +262,7 @@ export function StoryGeneratorWorkspace({view="generator",onOpenMangaStory}:{vie
         chapters:value.chapters.map((item)=>item.id===created.id?{...item,explainer,updatedAt:now()}:item),
         updatedAt:now()}));
       const ready=saved.chapters.find((item)=>item.id===created.id)!;
+      onPipelineStage?.("story");
 
       if(saved.autoGenerateManga)dispatchToMangaStudio(ready,"build");
       else dispatchToMangaStudio(ready,"sync");
