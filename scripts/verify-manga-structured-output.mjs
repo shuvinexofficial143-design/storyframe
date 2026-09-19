@@ -215,6 +215,17 @@ try{
   assert.match(studioSource,/StoryGeneratorWorkspace/);
   assert.match(studioSource,/phase:"build"\|"planning"\|"images"/);
   assert.match(studioSource,/command\.phase==="planning"/);
+  assert.match(studioSource,/beginCancelableTask/);
+  assert.match(studioSource,/cancelCurrentTask/);
+  assert.match(studioSource,/storyframe:cancel-manga-job/);
+  assert.match(studioSource,/signal:controller\.signal/);
+  assert.match(storyGeneratorSource,/cancelGeneratorTask/);
+  assert.match(storyGeneratorSource,/storyframe:cancel-story-generator-job/);
+  assert.match(storyGeneratorSource,/signal:controller\.signal/);
+  assert.match(appShellSource,/cancelActiveWork/);
+  assert.match(appShellSource,/Cancel/);
+  assert.match(queueSource,/signal\?:AbortSignal/);
+  assert.match(queueSource,/throwIfAborted/);
   assert.match(storyGeneratorSource,/syncOnly/);
   assert.match(storyGeneratorSource,/Explainer stays separate and is never sent to Manga Studio/);
   assert.match(studioSource,/detail\.syncOnly/);
