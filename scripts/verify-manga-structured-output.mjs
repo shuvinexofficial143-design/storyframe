@@ -195,6 +195,9 @@ try{
   assert.match(storyGeneratorSource,/storyframe:story-generator-command/);
   assert.match(storyGeneratorApiSource,/Write exactly ONE next chapter/);
   assert.match(storyGeneratorApiSource,/Do not hard-cap chapter count/);
+  assert.match(storyGeneratorApiSource,/readableStructuredText/);
+  assert.match(storyGeneratorApiSource,/storyBible:FlexibleText\(20\)/);
+  assert.match(storyGeneratorApiSource,/majorArcs:FlexibleTextArray/);
   assert.match(studioSource,/storyframe:story-generator-result/);
 
   console.log("Manga structured-output, one-page pacing, color-style, chapter-continuity and quota-queue regression checks passed.");
