@@ -30,15 +30,20 @@ export function partitionBeatCounts(total:number){
   return [...Array.from({length:Math.max(0,threes-1)},()=>3),5];
 }
 
-async function planExactGroup(input:PagePlannerInput,maxAttempts=3){
+async function planExactGroup(input:PagePlannerInput,maxAttempts=4){
   let lastError:unknown;
   const exactInput:PagePlannerInput={
     ...input,
     storySummary:`${input.storySummary}\n\nPLANNER CONTROL: This request is for ONE manga page only. It contains exactly ${input.beats.length} supplied beats. Consume ALL supplied beat IDs in order in one 3-5 panel page. Do not return a second page. Preserve the exact incoming continuity state and produce the exact end state for the next page.`
   };
+  const expectedIds=input.beats.map((beat)=>beat.id).join(", ");
   for(let attempt=1;attempt<=maxAttempts;attempt+=1){
     try{
-      const result=await planMangaPagesBase(exactInput);
+      const attemptInput=attempt===1?exactInput:{
+        ...exactInput,
+        storySummary:`${exactInput.storySummary}\n\nSEMANTIC RECOVERY ATTEMPT ${attempt}/${maxAttempts}: The previous page-plan response duplicated, skipped, reordered, or mislabeled a supplied beat. The ONLY valid panel beatId sequence is exactly: [${expectedIds}]. Return exactly ${input.beats.length} panels in that order, one panel per ID, with no repeated ID and no extra page.`
+      };
+      const result=await planMangaPagesBase(attemptInput);
       if(result.nextBeatIndex===input.beats.length&&result.pages.length===1)return result;
       lastError=new Error(`Manga page planner returned ${result.pages.length} page(s) and consumed ${result.nextBeatIndex}/${input.beats.length} beats; exactly one complete page was required.`);
     }catch(error){

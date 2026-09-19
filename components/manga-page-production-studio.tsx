@@ -246,6 +246,24 @@ export function MangaPageProductionStudio(){
 
   const seedPages=(currentProject:MangaProject,pages:MangaPage[])=>pages.map((page)=>({...page,panels:page.panels.map((panel)=>({...panel,seed:deriveSeed(currentProject.visualBible.masterSeed,panel.id,0)}))}));
 
+  const isRecoverablePlannerOrderError=(error:unknown)=>error instanceof Error&&/(duplicated a story beat|skipped or reordered beats|unknown beat ID|made no progress)/i.test(error.message);
+
+  const requestPageChunkWithAutoRetry=async(currentProject:MangaProject,currentProduction:MangaChapterProduction,startBeatIndex:number,pageStartNumber:number)=>{
+    let lastError:unknown;
+    const maxAttempts=3;
+    for(let attempt=1;attempt<=maxAttempts;attempt+=1){
+      try{
+        return await requestPageChunk(currentProject,currentProduction,startBeatIndex,pageStartNumber);
+      }catch(error){
+        lastError=error;
+        if(!isRecoverablePlannerOrderError(error)||attempt===maxAttempts)throw error;
+        setProgress(`Page ${pageStartNumber} planner returned inconsistent beat order. Auto-retrying ${attempt+1}/${maxAttempts}…`);
+        await wait(1200*attempt);
+      }
+    }
+    throw lastError instanceof Error?lastError:new Error("Manga page planner retry failed.");
+  };
+
   const saveProduction=(baseProject:MangaProject,chapterId:string,nextProduction:MangaChapterProduction)=>{
     const nextProject={...baseProject,updatedAt:now(),chapters:baseProject.chapters.map((item)=>item.id===chapterId?{...item,manga:nextProduction,updatedAt:now()}:item)};
     applyState((current)=>mutateProject(current,baseProject.id,()=>nextProject));
@@ -262,7 +280,7 @@ export function MangaPageProductionStudio(){
       const startIndex=workingProduction.nextBeatIndex;
       setBusy("planning");
       setProgress(`Planning manga pages… ${startIndex}/${workingProduction.beats.length} beats assigned`);
-      const planned=await requestPageChunk(workingProject,workingProduction,startIndex,(workingProduction.pages.at(-1)?.pageNumber||0)+1);
+      const planned=await requestPageChunkWithAutoRetry(workingProject,workingProduction,startIndex,(workingProduction.pages.at(-1)?.pageNumber||0)+1);
       if(planned.nextBeatIndex<=startIndex)throw new Error("Manga page planner made no progress. Please retry.");
       const pages=[...workingProduction.pages,...seedPages(workingProject,planned.pages)];
       workingProduction={
