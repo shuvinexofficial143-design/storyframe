@@ -74,21 +74,49 @@ const OverviewOutput=z.object({
   generationRules:FlexibleTextArray.default([])
 });
 
+const FlexibleBoolean=z.preprocess((value)=>{
+  if(typeof value==="boolean")return value;
+  if(typeof value==="number")return value!==0;
+  if(typeof value==="string"){
+    const normalized=value.trim().toLowerCase();
+    if(["true","yes","1","complete","completed"].includes(normalized))return true;
+    if(["false","no","0","incomplete","ongoing","continue"].includes(normalized))return false;
+  }
+  return false;
+},z.boolean());
+
+function compactExcerpt(value:string,fromEnd=false,max=900){
+  const normalized=value.replace(/\s+/g," ").trim();
+  if(normalized.length<=max)return normalized;
+  return fromEnd?`…${normalized.slice(-max)}`:`${normalized.slice(0,max)}…`;
+}
+
 const ChapterOutput=z.object({
   title:FlexibleText(1),
   story:FlexibleText(200),
-  summary:FlexibleText(20),
-  endingState:FlexibleText(10),
+  summary:FlexibleText().default(""),
+  endingState:FlexibleText().default(""),
   nextHook:FlexibleText().default(""),
-  continuityMemory:FlexibleText(20),
-  storyComplete:z.coerce.boolean().default(false)
+  continuityMemory:FlexibleText().default(""),
+  storyComplete:FlexibleBoolean.default(false)
+}).transform((value)=>{
+  const summary=value.summary.length>=20
+    ? value.summary
+    : `Chapter ${value.title} summary context: ${compactExcerpt(value.story,false,900)}`;
+  const endingState=value.endingState.length>=10
+    ? value.endingState
+    : `Chapter ending state: ${compactExcerpt(value.story,true,700)}`;
+  const continuityMemory=value.continuityMemory.length>=20
+    ? value.continuityMemory
+    : `${summary}\n\n${endingState}${value.nextHook?`\n\nNext hook: ${value.nextHook}`:""}`.slice(0,12000);
+  return {...value,summary,endingState,continuityMemory};
 });
 
 const ExplainerOutput=z.object({explainer:FlexibleText(100)});
 
 const SYSTEM_OVERVIEW=`You are StoryFrame Long-Form Story Architect. Return strict JSON only. Design a long-running story from the user's concept without writing all chapters now. The story must be suitable for sequential chapter generation, manga adaptation and continuity over many chapters. Plan broad arcs, world rules, character progression, mysteries and the ending direction. Do not hard-cap chapter count; duration and natural pacing matter more than a fixed number.`;
 
-const SYSTEM_CHAPTER=`You are StoryFrame Chapter Writer. Return strict JSON only. Write exactly ONE next chapter, never multiple chapters. Preserve the supplied Story Bible, chronology, character identities, powers, relationships, unresolved plot points and ending state. The chapter must read like a complete story chapter with a beginning, escalation and closing hook while continuing the larger series. Do not summarize instead of writing the chapter. Do not finish the entire story early unless the planned ending has genuinely been reached near the requested total duration. continuityMemory must be a compact authoritative state for generating the next chapter.`;
+const SYSTEM_CHAPTER=`You are StoryFrame Chapter Writer. Return strict JSON only. Write exactly ONE next chapter, never multiple chapters. Preserve the supplied Story Bible, chronology, character identities, powers, relationships, unresolved plot points and ending state. The chapter must read like a complete story chapter with a beginning, escalation and closing hook while continuing the larger series. Do not summarize instead of writing the chapter. Do not finish the entire story early unless the planned ending has genuinely been reached near the requested total duration. summary must contain a useful chapter recap, endingState must state the exact physical/story state at the chapter end, and continuityMemory must be a compact authoritative state for generating the next chapter. Never return placeholder words such as "same", "done", "continue", "N/A" or empty metadata.`;
 
 const SYSTEM_EXPLAINER=`You are StoryFrame Explainer Writer. Return strict JSON only. Transform the supplied chapter into a separate narration/explainer script following the user's explainer instructions. Preserve facts and chronology. This output is for narration and must not alter the original chapter.`;
 

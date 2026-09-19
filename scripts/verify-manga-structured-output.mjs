@@ -198,6 +198,11 @@ try{
   assert.match(storyGeneratorApiSource,/readableStructuredText/);
   assert.match(storyGeneratorApiSource,/storyBible:FlexibleText\(20\)/);
   assert.match(storyGeneratorApiSource,/majorArcs:FlexibleTextArray/);
+  assert.match(storyGeneratorApiSource,/compactExcerpt/);
+  assert.match(storyGeneratorApiSource,/value\.summary\.length>=20/);
+  assert.match(storyGeneratorApiSource,/value\.endingState\.length>=10/);
+  assert.match(storyGeneratorApiSource,/value\.continuityMemory\.length>=20/);
+  assert.doesNotMatch(storyGeneratorApiSource,/z\.coerce\.boolean/);
   assert.match(studioSource,/storyframe:story-generator-result/);
 
   console.log("Manga structured-output, one-page pacing, color-style, chapter-continuity and quota-queue regression checks passed.");
