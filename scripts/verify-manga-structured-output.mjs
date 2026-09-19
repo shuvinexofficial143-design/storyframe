@@ -132,8 +132,8 @@ try{
       return "planned";
     }
   });
-  assert.deepEqual(retryDelays,[2000,5000]);
-  assert.deepEqual(attempted,["google/gemini-3.1-pro-preview","google/gemini-3.1-pro-preview","google/gemini-3.1-pro-preview","mistralai/mistral-large-2512"]);
+  assert.deepEqual(retryDelays,[1000,2000,4000,8000]);
+  assert.deepEqual(attempted,["google/gemini-3.1-pro-preview","google/gemini-3.1-pro-preview","google/gemini-3.1-pro-preview","google/gemini-3.1-pro-preview","google/gemini-3.1-pro-preview","mistralai/mistral-large-2512"]);
   assert.equal(fallbackResult.data,"planned");
   assert.equal(fallbackResult.fallbackUsed,true);
 
@@ -173,8 +173,8 @@ try{
   assert.match(studioSource,/getPreviousRenderedMangaPage/);
   assert.match(studioSource,/requestQueuedMangaImage/);
   assert.match(studioSource,/filter\(\(page\)=>!page\.composedImageDataUrl\)/);
-  assert.match(queueSource,/DEFAULT_IMAGE_REQUEST_INTERVAL_MS=12_000/);
-  assert.match(queueSource,/20_000,40_000,60_000/);
+  assert.match(queueSource,/DEFAULT_IMAGE_REQUEST_INTERVAL_MS=4_000/);
+  assert.match(queueSource,/2_000,4_000,8_000,16_000,32_000/);
   assert.match(chapterContinuitySource,/previous chapter ending/i);
   assert.match(studioSource,/fetch\("\/api\/manga\/production-plan"/);
   assert.match(studioSource,/storyframe-manga-background-run:/);

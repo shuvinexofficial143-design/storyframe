@@ -1,5 +1,5 @@
-export const DEFAULT_IMAGE_REQUEST_INTERVAL_MS=12_000;
-export const IMAGE_QUOTA_BACKOFF_MS=[20_000,40_000,60_000] as const;
+export const DEFAULT_IMAGE_REQUEST_INTERVAL_MS=4_000;
+export const IMAGE_QUOTA_BACKOFF_MS=[2_000,4_000,8_000,16_000,32_000] as const;
 
 let lastImageRequestStartedAt=0;
 let queueTail:Promise<void>=Promise.resolve();
@@ -32,7 +32,9 @@ function retryDelay(payload:unknown,attempt:number){
     const retryAfterMs=(payload as {retryAfterMs?:unknown}).retryAfterMs;
     if(typeof retryAfterMs==="number"&&Number.isFinite(retryAfterMs))return Math.max(1_000,Math.min(90_000,retryAfterMs));
   }
-  return IMAGE_QUOTA_BACKOFF_MS[Math.min(attempt,IMAGE_QUOTA_BACKOFF_MS.length-1)];
+  const base=IMAGE_QUOTA_BACKOFF_MS[Math.min(attempt,IMAGE_QUOTA_BACKOFF_MS.length-1)];
+  const jitter=Math.floor(Math.random()*Math.min(1_000,Math.max(250,base*.25)));
+  return base+jitter;
 }
 
 async function runQueued<T>(work:()=>Promise<T>,signal?:AbortSignal){

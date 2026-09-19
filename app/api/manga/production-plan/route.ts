@@ -15,7 +15,7 @@ import {XKiroRequestError} from "@/lib/xkiro";
 // Vercel kill the function at the old 120s boundary and return non-JSON HTML.
 export const maxDuration=300;
 
-const DEFAULT_GEMINI_PAGE_PLANNING_COOLDOWN_MS=12_000;
+const DEFAULT_GEMINI_PAGE_PLANNING_COOLDOWN_MS=4_000;
 
 const Base=z.object({
   action:z.enum(["master","pages"]),
@@ -87,12 +87,13 @@ export async function POST(request:Request){
     if(data.action==="master"){
       const masterData=data;
 
-      // Do not repeat a potentially 120-second master-analysis call inside the
-      // same server invocation. If Gemini times out/429s, fail over immediately
-      // to xKiro so the request still has time to return a proper JSON response.
+      // A 429 from Standard PayGo is normally temporary shared-capacity contention,
+      // not a one-minute fixed quota reset. Retry only quick rate-limit failures here;
+      // timeouts still fall back immediately so the 300s Vercel budget is protected.
       const result=await withStoryModelFallback({
         model:analysisModel,
-        retryDelaysMs:[],
+        retryDelaysMs:[1_000,2_000,4_000,8_000],
+        retryOnlyRateLimit:true,
         run:async(model)=>{
           const masterInput={...masterData,analysisModel:model};
           return shouldUseLongStoryAnalysis(masterData.story)

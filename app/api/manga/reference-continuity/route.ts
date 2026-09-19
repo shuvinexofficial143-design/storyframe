@@ -40,7 +40,7 @@ export async function POST(request:Request){
     const message=error instanceof Error?error.message:"Character reference generation failed";
     if(isRetryableImageProviderFailure(error)){
       const quota=/\b429\b|resource exhausted|quota|rate limit|too many requests/i.test(message);
-      return NextResponse.json({error:message,retryable:true,retryAfterMs:quota?20_000:10_000},{status:quota?429:503});
+      return NextResponse.json({error:message,retryable:true},{status:quota?429:503});
     }
     return NextResponse.json({error:message},{status:502});
   }
