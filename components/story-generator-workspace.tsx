@@ -1,7 +1,7 @@
 "use client";
 
 import {useEffect,useMemo,useRef,useState} from "react";
-import {BookOpen,Loader2,Play,RotateCcw,Sparkles,WandSparkles} from "lucide-react";
+import {Loader2,Play,RotateCcw,Sparkles,WandSparkles} from "lucide-react";
 import {parseJsonResponse} from "@/lib/fetch-json";
 import {DEFAULT_STORY_ANALYSIS_MODEL,STORY_ANALYSIS_MODEL_OPTIONS,type StoryAnalysisModel} from "@/lib/story-analysis-models";
 import {loadStoryGeneratorState,saveStoryGeneratorState} from "@/lib/story-generator/storage";
@@ -205,6 +205,7 @@ export function StoryGeneratorWorkspace(){
     }
   };
 
+  // eslint-disable-next-line react-hooks/refs -- auto-continue must call the latest chapter generator closure after async manga completion.
   nextChapterRunnerRef.current=generateNextChapter;
 
   const sendSelectedToManga=()=>{
