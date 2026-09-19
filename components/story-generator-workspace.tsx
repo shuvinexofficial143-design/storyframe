@@ -1,7 +1,6 @@
 "use client";
 
 import {useEffect,useMemo,useRef,useState} from "react";
-import {useRouter} from "next/navigation";
 import {Loader2,Play,RotateCcw,Sparkles,WandSparkles} from "lucide-react";
 import {parseJsonResponse} from "@/lib/fetch-json";
 import {DEFAULT_STORY_ANALYSIS_MODEL,STORY_ANALYSIS_MODEL_OPTIONS,type StoryAnalysisModel} from "@/lib/story-analysis-models";
@@ -35,8 +34,9 @@ function wordCount(value:string){return value.trim()?value.trim().split(/\s+/).f
 function chapterId(number:number){return `generated-chapter-${number}-${Date.now().toString(36)}`}
 function requestId(number:number){return `storygen-${number}-${Date.now().toString(36)}`}
 
-export function StoryGeneratorWorkspace(){
-  const router=useRouter();
+export type StoryGeneratorView="generator"|"chapters"|"explainer";
+
+export function StoryGeneratorWorkspace({view="generator",onOpenMangaStory}:{view?:StoryGeneratorView;onOpenMangaStory?:()=>void}){
   const [state,setState]=useState<StoryGeneratorState>(()=>initialState());
   const stateRef=useRef(state);
   const [hydrated,setHydrated]=useState(false);
@@ -231,11 +231,27 @@ export function StoryGeneratorWorkspace(){
   const openSelectedInManga=()=>{
     if(!selected||state.running)return;
     if(selected.mangaStatus==="complete"){
-      router.push("/");
+      onOpenMangaStory?.();
       return;
     }
     dispatchToMangaStudio(selected,"build");
-    setTimeout(()=>router.push("/"),50);
+    setTimeout(()=>onOpenMangaStory?.(),50);
+  };
+
+  const retryResume=()=>{
+    if(state.running)return;
+    const current=stateRef.current;
+    const target=current.chapters.find((item)=>item.id===selectedChapterId)||current.chapters.at(-1);
+    if(target&&(target.mangaStatus==="error"||target.mangaStatus==="queued")){
+      dispatchToMangaStudio(target,"build");
+      setTimeout(()=>onOpenMangaStory?.(),50);
+      return;
+    }
+    if(current.overview){
+      void generateNextChapter();
+      return;
+    }
+    void generateOverview();
   };
 
   const resetGenerator=()=>{
@@ -246,22 +262,29 @@ export function StoryGeneratorWorkspace(){
     setSelectedChapterId("");
   };
 
-  return <section className="min-h-screen bg-white text-slate-900">
-    <div className="mx-auto max-w-7xl space-y-5 px-4 py-6">
+  const chapterTabs=state.chapters.length?<div className="flex gap-2 overflow-x-auto">{state.chapters.map((item)=><button key={item.id} onClick={()=>setSelectedChapterId(item.id)} className={"whitespace-nowrap rounded-lg px-3 py-2 text-xs font-semibold "+(selected?.id===item.id?"bg-violet-600 text-white":"bg-slate-100 text-slate-600")}>Ch {item.number} · {item.mangaStatus}</button>)}</div>:null;
+  const showRetry=Boolean(state.error)||selected?.mangaStatus==="error";
+
+  return <section className="bg-white text-slate-900">
+    <div className="space-y-5 py-1">
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div><div className="flex items-center gap-2 text-xl font-black"><WandSparkles className="text-violet-600" size={21}/> Story Generator</div><p className="mt-1 text-sm text-slate-500">Prompt → Story Overview → one chapter → Explainer → your existing Manga Studio pipeline → next chapter.</p></div>
+          <div>
+            <div className="flex items-center gap-2 text-xl font-black"><WandSparkles className="text-violet-600" size={21}/>{view==="generator"?"Story Generator":view==="chapters"?"Chapters":"Chapter Explainer"}</div>
+            <p className="mt-1 text-sm text-slate-500">{view==="generator"?"Prompt → Story Overview → one chapter at a time.":view==="chapters"?"Generated original chapters stay separate from explainer text and feed the existing Manga Studio pipeline.":"Chapter-wise YouTube/story explainer output. This text is never sent to Manga Studio."}</p>
+          </div>
           <div className="flex flex-wrap gap-2">
-            <button disabled={state.running} onClick={resetGenerator} className="rounded-xl border border-slate-200 px-3 py-2 text-sm disabled:opacity-40"><RotateCcw className="mr-1 inline" size={14}/> New Story</button>
-            <button disabled={state.running||!state.overview} onClick={()=>void generateNextChapter()} className="rounded-xl bg-violet-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-40">{state.running?<Loader2 className="mr-1 inline animate-spin" size={15}/>:<Play className="mr-1 inline" size={15}/>} Generate Next Chapter</button>
+            {view==="generator"&&<button disabled={state.running} onClick={resetGenerator} className="rounded-xl border border-slate-200 px-3 py-2 text-sm disabled:opacity-40"><RotateCcw className="mr-1 inline" size={14}/> New Story</button>}
+            {view==="chapters"&&<button disabled={state.running||!state.overview} onClick={()=>void generateNextChapter()} className="rounded-xl bg-violet-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-40">{state.running?<Loader2 className="mr-1 inline animate-spin" size={15}/>:<Play className="mr-1 inline" size={15}/>} Generate Next Chapter</button>}
+            {showRetry&&<button disabled={state.running} onClick={retryResume} className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-bold text-amber-800 disabled:opacity-40">Retry / Resume</button>}
           </div>
         </div>
         {state.status&&<div className="mt-4 rounded-xl border border-violet-200 bg-violet-50 p-3 text-sm text-violet-800">{state.running&&<Loader2 className="mr-2 inline animate-spin" size={14}/>} {state.status}</div>}
         {state.error&&<div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{state.error}</div>}
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[1.15fr_.85fr]">
-        <div className="space-y-5">
+      {view==="generator"&&<>
+        <div className="grid gap-5 xl:grid-cols-[1.15fr_.85fr]">
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="mb-3 font-bold">Story Prompt</div>
             <textarea disabled={state.running} value={state.prompt} onChange={(event)=>update({prompt:event.target.value})} className="min-h-64 w-full rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm leading-7 outline-none focus:border-violet-400 disabled:opacity-60" placeholder="अपना पूरा concept, world, hero, genre, story कैसी होनी चाहिए, कितनी लंबी होनी चाहिए और special instructions यहाँ लिखो…"/>
@@ -278,33 +301,48 @@ export function StoryGeneratorWorkspace(){
           </div>
 
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="font-bold">Explainer Prompt</div>
-            <p className="mt-1 text-xs text-slate-500">हर generated chapter का अलग YouTube/story-explainer output इसी instruction से बनेगा। Original chapter नहीं बदलेगा।</p>
-            <textarea disabled={state.running} value={state.explainerPrompt} onChange={(e)=>update({explainerPrompt:e.target.value})} className="mt-3 min-h-36 w-full rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 outline-none focus:border-violet-400"/>
+            <div className="font-bold">Story Overview</div>
+            {state.overview?<div className="mt-4 space-y-4 text-sm">
+              <div><div className="text-xl font-black">{state.overview.title}</div><div className="mt-1 text-slate-500">{state.overview.genre} · {state.overview.tone} · {state.overview.language}</div></div>
+              <p className="leading-6">{state.overview.overview}</p>
+              <div className="rounded-xl bg-slate-50 p-3"><div className="text-xs font-bold uppercase tracking-wide text-slate-500">Long-form plan</div><div className="mt-1">{state.overview.targetHours} hours · ~{state.overview.estimatedChapterCount} estimated chapters · ~{state.overview.chapterWordTarget} words/chapter</div><div className="mt-1 text-xs text-slate-500">Estimated chapters are guidance only; there is no fixed chapter cap.</div></div>
+              <details className="rounded-xl border border-slate-200 p-3"><summary className="cursor-pointer font-semibold">Story Bible</summary><div className="mt-3 whitespace-pre-wrap leading-6 text-slate-600">{state.overview.storyBible}</div></details>
+              <details className="rounded-xl border border-slate-200 p-3"><summary className="cursor-pointer font-semibold">Major Arcs</summary><ol className="mt-3 list-decimal space-y-2 pl-5 text-slate-600">{state.overview.majorArcs.map((arc,index)=><li key={index}>{arc}</li>)}</ol></details>
+            </div>:<div className="mt-4 rounded-xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-400">Story Prompt के बाद पहले overview बनेगा; chapters एक-एक करके generate होंगे।</div>}
           </div>
         </div>
+      </>}
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="font-bold">Story Overview</div>
-          {state.overview?<div className="mt-4 space-y-4 text-sm">
-            <div><div className="text-xl font-black">{state.overview.title}</div><div className="mt-1 text-slate-500">{state.overview.genre} · {state.overview.tone} · {state.overview.language}</div></div>
-            <p className="leading-6">{state.overview.overview}</p>
-            <div className="rounded-xl bg-slate-50 p-3"><div className="text-xs font-bold uppercase tracking-wide text-slate-500">Long-form plan</div><div className="mt-1">{state.overview.targetHours} hours · ~{state.overview.estimatedChapterCount} estimated chapters · ~{state.overview.chapterWordTarget} words/chapter</div><div className="mt-1 text-xs text-slate-500">Estimated chapters are guidance only; there is no fixed chapter cap.</div></div>
-            <details className="rounded-xl border border-slate-200 p-3"><summary className="cursor-pointer font-semibold">Story Bible</summary><div className="mt-3 whitespace-pre-wrap leading-6 text-slate-600">{state.overview.storyBible}</div></details>
-            <details className="rounded-xl border border-slate-200 p-3"><summary className="cursor-pointer font-semibold">Major Arcs</summary><ol className="mt-3 list-decimal space-y-2 pl-5 text-slate-600">{state.overview.majorArcs.map((arc,index)=><li key={index}>{arc}</li>)}</ol></details>
-          </div>:<div className="mt-4 rounded-xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-400">Story Prompt के बाद पहले overview बनेगा; एक साथ 10–15 chapters नहीं बनेंगे।</div>}
-        </div>
-      </div>
-
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      {view==="chapters"&&<div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3"><div><div className="font-bold">Generated Chapters</div><div className="text-xs text-slate-500">{state.chapters.length} chapters · {totalWords.toLocaleString()} story words generated</div></div>{state.autoContinue&&<div className="rounded-lg bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">Auto Continue ON</div>}</div>
-        {state.chapters.length?<div className="mt-4 flex gap-2 overflow-x-auto">{state.chapters.map((item)=><button key={item.id} onClick={()=>setSelectedChapterId(item.id)} className={`whitespace-nowrap rounded-lg px-3 py-2 text-xs font-semibold ${selected?.id===item.id?"bg-violet-600 text-white":"bg-slate-100 text-slate-600"}`}>Ch {item.number} · {item.mangaStatus}</button>)}</div>:null}
+        <div className="mt-4">{chapterTabs}</div>
+        {selected?<article className="mt-5 rounded-xl border border-slate-200 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div><div className="text-xs font-bold uppercase tracking-wide text-violet-600">Original Chapter {selected.number}</div><h3 className="mt-1 text-lg font-black">{selected.title}</h3><div className="mt-1 text-xs text-slate-400">{selected.wordCount} words · Manga: {selected.mangaStatus}</div></div>
+            <div className="flex flex-wrap gap-2">
+              {selected.mangaStatus==="error"&&<button disabled={state.running} onClick={retryResume} className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800 disabled:opacity-40">Retry / Resume</button>}
+              <button disabled={state.running||selected.mangaStatus==="building"} onClick={openSelectedInManga} className="rounded-lg bg-violet-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-40">{selected.mangaStatus==="complete"?"Open Manga Studio":"Open in Manga Studio & Build"}</button>
+            </div>
+          </div>
+          <div className="mt-4 max-h-[680px] overflow-y-auto whitespace-pre-wrap text-sm leading-7 text-slate-700">{selected.story}</div>
+          {selected.error&&<div className="mt-4 rounded-lg bg-red-50 p-3 text-xs text-red-700">{selected.error}</div>}
+        </article>:<div className="mt-4 rounded-xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-400">Story Generator में overview बनाकर Chapter 1 generate करो।</div>}
+      </div>}
 
-        {selected?<div className="mt-5 grid gap-5 xl:grid-cols-2">
-          <article className="rounded-xl border border-slate-200 p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><div className="text-xs font-bold uppercase tracking-wide text-violet-600">Original Chapter {selected.number}</div><h3 className="mt-1 text-lg font-black">{selected.title}</h3><div className="mt-1 text-xs text-slate-400">{selected.wordCount} words · Manga: {selected.mangaStatus}</div></div><button disabled={state.running||selected.mangaStatus==="building"} onClick={openSelectedInManga} className="rounded-lg bg-violet-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-40">{selected.mangaStatus==="complete"?"Open Manga Studio":"Open in Manga Studio & Build"}</button></div><div className="mt-4 max-h-[620px] overflow-y-auto whitespace-pre-wrap text-sm leading-7 text-slate-700">{selected.story}</div></article>
-          <article className="rounded-xl border border-slate-200 p-4"><div className="flex items-center justify-between gap-3"><div><div className="text-xs font-bold uppercase tracking-wide text-cyan-600">Explainer</div><h3 className="mt-1 font-bold">Chapter {selected.number} Explainer Script</h3><div className="mt-1 text-[11px] text-slate-400">Explainer stays separate and is never sent to Manga Studio.</div></div></div><div className="mt-4 max-h-[620px] overflow-y-auto whitespace-pre-wrap text-sm leading-7 text-slate-700">{selected.explainer||"Explainer अभी generate नहीं हुआ।"}</div><div className="mt-4 rounded-lg bg-slate-50 p-3 text-xs text-slate-500"><div>Manga status: <strong>{selected.mangaStatus}</strong></div>{selected.error&&<div className="mt-1 text-red-600">{selected.error}</div>}<div className="mt-2">Ending state: {selected.endingState}</div>{selected.nextHook&&<div className="mt-1">Next hook: {selected.nextHook}</div>}</div></article>
-        </div>:<div className="mt-4 rounded-xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-400">Generate Chapter 1 to start the chapter-by-chapter pipeline.</div>}
-      </div>
+      {view==="explainer"&&<div className="grid gap-5 xl:grid-cols-[.9fr_1.1fr]">
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="font-bold">Explainer Prompt</div>
+          <p className="mt-1 text-xs text-slate-500">यह सिर्फ chapter-wise explainer output के लिए है। Original chapter और Manga Studio story इससे नहीं बदलेंगे।</p>
+          <textarea disabled={state.running} value={state.explainerPrompt} onChange={(e)=>update({explainerPrompt:e.target.value})} className="mt-3 min-h-44 w-full rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 outline-none focus:border-violet-400"/>
+          <div className="mt-4">{chapterTabs}</div>
+        </div>
+        <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="text-xs font-bold uppercase tracking-wide text-cyan-600">Chapter Explainer</div>
+          <h3 className="mt-1 font-bold">{selected?("Chapter "+selected.number+": "+selected.title):"No chapter selected"}</h3>
+          <div className="mt-1 text-[11px] text-slate-400">Explainer stays separate and is never sent to Manga Studio.</div>
+          <div className="mt-4 max-h-[680px] overflow-y-auto whitespace-pre-wrap text-sm leading-7 text-slate-700">{selected?.explainer||"इस chapter का explainer अभी generate नहीं हुआ।"}</div>
+        </article>
+      </div>}
     </div>
   </section>;
 }
