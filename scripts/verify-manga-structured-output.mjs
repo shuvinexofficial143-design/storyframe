@@ -164,6 +164,7 @@ try{
   const homeSource=fs.readFileSync(path.join(root,"app/page.tsx"),"utf8");
   const storyGeneratorSource=fs.readFileSync(path.join(root,"components/story-generator-workspace.tsx"),"utf8");
   const storyGeneratorApiSource=fs.readFileSync(path.join(root,"app/api/story-generator/route.ts"),"utf8");
+  const storyGeneratorRouteSource=fs.readFileSync(path.join(root,"app/story-generator/page.tsx"),"utf8");
   assert.match(typeSource,/"Full Color Manga"/);
   assert.match(presetSource,/COLOR MODE: FULL COLOR/);
   assert.match(presetSource,/no monochrome-only page/);
@@ -188,8 +189,9 @@ try{
   assert.match(studioSource,/storyframe:manga-job-status/);
   assert.doesNotMatch(studioSource,/tabs\.map\(\(\[id,label\]\)=>\<button key=\{id\} disabled=\{!!busy\}/);
   assert.match(homeSource,/return null/);
-  assert.match(appShellSource,/Story Generator/);
-  assert.match(appShellSource,/StoryGeneratorWorkspace/);
+  assert.doesNotMatch(appShellSource,/\/story-generator","Story Generator/);
+  assert.doesNotMatch(appShellSource,/StoryGeneratorWorkspace/);
+  assert.match(storyGeneratorRouteSource,/redirect\("\/"\)/);
   assert.match(storyGeneratorSource,/Generate Story Overview/);
   assert.match(storyGeneratorSource,/Explainer Prompt/);
   assert.match(storyGeneratorSource,/storyframe:story-generator-command/);
@@ -205,6 +207,14 @@ try{
   assert.doesNotMatch(storyGeneratorApiSource,/z\.coerce\.boolean/);
   assert.match(studioSource,/storyframe:story-generator-result/);
   assert.match(storyGeneratorSource,/Open in Manga Studio & Build/);
+  assert.match(storyGeneratorSource,/Retry \/ Resume/);
+  assert.match(storyGeneratorSource,/StoryGeneratorView="generator"\|"chapters"\|"explainer"/);
+  assert.match(studioSource,/\["generator","Story Generator"\]/);
+  assert.match(studioSource,/\["generated-chapters","Chapters"\]/);
+  assert.match(studioSource,/\["chapter-explainer","Chapter Explainer"\]/);
+  assert.match(studioSource,/StoryGeneratorWorkspace/);
+  assert.match(studioSource,/phase:"build"\|"planning"\|"images"/);
+  assert.match(studioSource,/command\.phase==="planning"/);
   assert.match(storyGeneratorSource,/syncOnly/);
   assert.match(storyGeneratorSource,/Explainer stays separate and is never sent to Manga Studio/);
   assert.match(studioSource,/detail\.syncOnly/);
