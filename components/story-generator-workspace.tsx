@@ -134,6 +134,7 @@ export function StoryGeneratorWorkspace(){
     window.dispatchEvent(new CustomEvent("storyframe:story-generator-command",{detail:{
       requestId:id,
       projectId:current.mangaProjectId,
+      existingChapterId:chapter.mangaChapterId,
       newProjectName:current.mangaProjectId?undefined:(current.overview?.title||"Generated Manga Story"),
       analysisModel:current.analysisModel,
       chapterNumber:chapter.number,
