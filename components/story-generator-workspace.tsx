@@ -1,6 +1,7 @@
 "use client";
 
 import {useEffect,useMemo,useRef,useState} from "react";
+import {useRouter} from "next/navigation";
 import {Loader2,Play,RotateCcw,Sparkles,WandSparkles} from "lucide-react";
 import {parseJsonResponse} from "@/lib/fetch-json";
 import {DEFAULT_STORY_ANALYSIS_MODEL,STORY_ANALYSIS_MODEL_OPTIONS,type StoryAnalysisModel} from "@/lib/story-analysis-models";
@@ -10,7 +11,7 @@ import type {GeneratedStoryChapter,StoryGeneratorState,StoryOverview} from "@/li
 type OverviewResponse={kind:"overview";data:StoryOverview};
 type ChapterResponse={kind:"chapter";data:{title:string;story:string;summary:string;endingState:string;nextHook:string;continuityMemory:string;storyComplete:boolean;provider?:string}};
 type ExplainerResponse={kind:"explainer";data:{explainer:string;provider?:string}};
-type MangaResult={requestId:string;ok:boolean;projectId?:string;chapterId?:string;message?:string};
+type MangaResult={requestId:string;ok:boolean;synced?:boolean;projectId?:string;chapterId?:string;message?:string};
 
 const now=()=>new Date().toISOString();
 const defaultExplainerPrompt="इस chapter को engaging Hindi YouTube/anime story explainer की तरह समझाओ। शुरुआत strong hook से करो, chronology साफ रखो, important action/reactions detail में बताओ, unnecessary description छोटा रखो और suspense natural तरीके से build करो।";
@@ -35,11 +36,12 @@ function chapterId(number:number){return `generated-chapter-${number}-${Date.now
 function requestId(number:number){return `storygen-${number}-${Date.now().toString(36)}`}
 
 export function StoryGeneratorWorkspace(){
+  const router=useRouter();
   const [state,setState]=useState<StoryGeneratorState>(()=>initialState());
   const stateRef=useRef(state);
   const [hydrated,setHydrated]=useState(false);
   const [selectedChapterId,setSelectedChapterId]=useState("");
-  const pendingMangaRef=useRef(new Map<string,string>());
+  const pendingMangaRef=useRef(new Map<string,{chapterId:string;mode:"sync"|"build"}>());
   const nextChapterRunnerRef=useRef<()=>Promise<void>>(async()=>{});
 
   const applyState=(updater:(current:StoryGeneratorState)=>StoryGeneratorState)=>{
@@ -71,21 +73,24 @@ export function StoryGeneratorWorkspace(){
     const handler=(event:Event)=>{
       const detail=(event as CustomEvent<MangaResult>).detail;
       if(!detail?.requestId)return;
-      const generatedId=pendingMangaRef.current.get(detail.requestId);
-      if(!generatedId)return;
+      const pending=pendingMangaRef.current.get(detail.requestId);
+      if(!pending)return;
       pendingMangaRef.current.delete(detail.requestId);
       const current=stateRef.current;
-      const target=current.chapters.find((item)=>item.id===generatedId);
+      const target=current.chapters.find((item)=>item.id===pending.chapterId);
       if(!target)return;
+      const syncOnly=pending.mode==="sync"||detail.synced===true;
       const next=applyState((value)=>({
         ...value,
         running:false,
-        status:detail.ok?`Chapter ${target.number} manga complete.`:`Chapter ${target.number} manga stopped.`,
+        status:detail.ok
+          ? syncOnly?`Chapter ${target.number} synced to Manga Studio. Original chapter is ready to build.`:`Chapter ${target.number} manga complete.`
+          :`Chapter ${target.number} manga stopped.`,
         error:detail.ok?"":detail.message||"Manga pipeline failed.",
         mangaProjectId:detail.projectId||value.mangaProjectId,
-        chapters:value.chapters.map((item)=>item.id===generatedId?{
+        chapters:value.chapters.map((item)=>item.id===pending.chapterId?{
           ...item,
-          mangaStatus:detail.ok?"complete":"error",
+          mangaStatus:detail.ok?(syncOnly?"queued":"complete"):"error",
           mangaProjectId:detail.projectId||item.mangaProjectId,
           mangaChapterId:detail.chapterId||item.mangaChapterId,
           error:detail.ok?undefined:(detail.message||"Manga pipeline failed."),
@@ -93,7 +98,7 @@ export function StoryGeneratorWorkspace(){
         }:item),
         updatedAt:now()
       }));
-      if(detail.ok&&next.autoContinue&&!target.storyComplete){
+      if(detail.ok&&!syncOnly&&next.autoContinue&&!target.storyComplete){
         setTimeout(()=>void nextChapterRunnerRef.current(),800);
       }
     };
@@ -126,11 +131,17 @@ export function StoryGeneratorWorkspace(){
     }
   };
 
-  const dispatchToMangaStudio=(chapter:GeneratedStoryChapter)=>{
+  const dispatchToMangaStudio=(chapter:GeneratedStoryChapter,mode:"sync"|"build"="build")=>{
     const current=stateRef.current;
     const id=requestId(chapter.number);
-    pendingMangaRef.current.set(id,chapter.id);
-    applyState((value)=>({...value,running:true,status:`Chapter ${chapter.number}: existing Manga Studio pipeline is analyzing, planning and generating pages…`,error:"",chapters:value.chapters.map((item)=>item.id===chapter.id?{...item,mangaStatus:"building",updatedAt:now()}:item),updatedAt:now()}));
+    pendingMangaRef.current.set(id,{chapterId:chapter.id,mode});
+    const syncOnly=mode==="sync";
+    applyState((value)=>({...value,running:true,status:syncOnly
+      ?`Chapter ${chapter.number}: syncing original story into Manga Studio…`
+      :`Chapter ${chapter.number}: existing Manga Studio pipeline is analyzing, planning and generating pages…`,
+      error:"",
+      chapters:value.chapters.map((item)=>item.id===chapter.id?{...item,mangaStatus:syncOnly?"queued":"building",updatedAt:now()}:item),
+      updatedAt:now()}));
     window.dispatchEvent(new CustomEvent("storyframe:story-generator-command",{detail:{
       requestId:id,
       projectId:current.mangaProjectId,
@@ -141,7 +152,8 @@ export function StoryGeneratorWorkspace(){
       title:chapter.title,
       story:chapter.story,
       summary:chapter.summary,
-      autoGenerateImages:true
+      autoGenerateImages:!syncOnly,
+      syncOnly
     }}));
   };
 
@@ -184,22 +196,30 @@ export function StoryGeneratorWorkspace(){
       setSelectedChapterId(created.id);
 
       const latest=stateRef.current;
-      const explainerResponse=await fetch("/api/story-generator",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
-        action:"explainer",
-        analysisModel:latest.analysisModel,
-        chapterTitle:created.title,
-        chapterStory:created.story,
-        explainerPrompt:latest.explainerPrompt
-      })});
-      const explainer=(await parseJsonResponse<ExplainerResponse>(explainerResponse)).data.explainer;
-      const saved=applyState((value)=>({...value,running:false,status:`Chapter ${number} + explainer ready.`,chapters:value.chapters.map((item)=>item.id===created.id?{...item,explainer,updatedAt:now()}:item),updatedAt:now()}));
+      let explainer="";
+      let explainerWarning="";
+      try{
+        const explainerResponse=await fetch("/api/story-generator",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
+          action:"explainer",
+          analysisModel:latest.analysisModel,
+          chapterTitle:created.title,
+          chapterStory:created.story,
+          explainerPrompt:latest.explainerPrompt
+        })});
+        explainer=(await parseJsonResponse<ExplainerResponse>(explainerResponse)).data.explainer;
+      }catch(error){
+        explainerWarning=error instanceof Error?error.message:"Explainer generation failed.";
+      }
+      const saved=applyState((value)=>({...value,running:false,status:explainerWarning
+        ?`Chapter ${number} saved. Explainer failed, but the original chapter is ready for Manga Studio.`
+        :`Chapter ${number} + explainer ready.`,
+        error:"",
+        chapters:value.chapters.map((item)=>item.id===created.id?{...item,explainer,updatedAt:now()}:item),
+        updatedAt:now()}));
       const ready=saved.chapters.find((item)=>item.id===created.id)!;
 
-      if(saved.autoGenerateManga){
-        dispatchToMangaStudio(ready);
-      }else if(saved.autoContinue&&!ready.storyComplete){
-        setTimeout(()=>void nextChapterRunnerRef.current(),500);
-      }
+      if(saved.autoGenerateManga)dispatchToMangaStudio(ready,"build");
+      else dispatchToMangaStudio(ready,"sync");
     }catch(error){
       update({running:false,status:"",error:error instanceof Error?error.message:`Chapter ${number} generation failed.`});
     }
@@ -208,9 +228,14 @@ export function StoryGeneratorWorkspace(){
   // eslint-disable-next-line react-hooks/refs -- auto-continue must call the latest chapter generator closure after async manga completion.
   nextChapterRunnerRef.current=generateNextChapter;
 
-  const sendSelectedToManga=()=>{
+  const openSelectedInManga=()=>{
     if(!selected||state.running)return;
-    dispatchToMangaStudio(selected);
+    if(selected.mangaStatus==="complete"){
+      router.push("/");
+      return;
+    }
+    dispatchToMangaStudio(selected,"build");
+    setTimeout(()=>router.push("/"),50);
   };
 
   const resetGenerator=()=>{
@@ -276,8 +301,8 @@ export function StoryGeneratorWorkspace(){
         {state.chapters.length?<div className="mt-4 flex gap-2 overflow-x-auto">{state.chapters.map((item)=><button key={item.id} onClick={()=>setSelectedChapterId(item.id)} className={`whitespace-nowrap rounded-lg px-3 py-2 text-xs font-semibold ${selected?.id===item.id?"bg-violet-600 text-white":"bg-slate-100 text-slate-600"}`}>Ch {item.number} · {item.mangaStatus}</button>)}</div>:null}
 
         {selected?<div className="mt-5 grid gap-5 xl:grid-cols-2">
-          <article className="rounded-xl border border-slate-200 p-4"><div className="flex items-center justify-between gap-3"><div><div className="text-xs font-bold uppercase tracking-wide text-violet-600">Original Chapter {selected.number}</div><h3 className="mt-1 text-lg font-black">{selected.title}</h3></div><div className="text-xs text-slate-400">{selected.wordCount} words</div></div><div className="mt-4 max-h-[620px] overflow-y-auto whitespace-pre-wrap text-sm leading-7 text-slate-700">{selected.story}</div></article>
-          <article className="rounded-xl border border-slate-200 p-4"><div className="flex items-center justify-between gap-3"><div><div className="text-xs font-bold uppercase tracking-wide text-cyan-600">Explainer</div><h3 className="mt-1 font-bold">Chapter {selected.number} Explainer Script</h3></div>{selected.mangaStatus!=="complete"&&<button disabled={state.running||selected.mangaStatus==="building"} onClick={sendSelectedToManga} className="rounded-lg bg-violet-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-40">Send to Manga Studio</button>}</div><div className="mt-4 max-h-[620px] overflow-y-auto whitespace-pre-wrap text-sm leading-7 text-slate-700">{selected.explainer||"Explainer अभी generate नहीं हुआ।"}</div><div className="mt-4 rounded-lg bg-slate-50 p-3 text-xs text-slate-500"><div>Manga status: <strong>{selected.mangaStatus}</strong></div>{selected.error&&<div className="mt-1 text-red-600">{selected.error}</div>}<div className="mt-2">Ending state: {selected.endingState}</div>{selected.nextHook&&<div className="mt-1">Next hook: {selected.nextHook}</div>}</div></article>
+          <article className="rounded-xl border border-slate-200 p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><div className="text-xs font-bold uppercase tracking-wide text-violet-600">Original Chapter {selected.number}</div><h3 className="mt-1 text-lg font-black">{selected.title}</h3><div className="mt-1 text-xs text-slate-400">{selected.wordCount} words · Manga: {selected.mangaStatus}</div></div><button disabled={state.running||selected.mangaStatus==="building"} onClick={openSelectedInManga} className="rounded-lg bg-violet-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-40">{selected.mangaStatus==="complete"?"Open Manga Studio":"Open in Manga Studio & Build"}</button></div><div className="mt-4 max-h-[620px] overflow-y-auto whitespace-pre-wrap text-sm leading-7 text-slate-700">{selected.story}</div></article>
+          <article className="rounded-xl border border-slate-200 p-4"><div className="flex items-center justify-between gap-3"><div><div className="text-xs font-bold uppercase tracking-wide text-cyan-600">Explainer</div><h3 className="mt-1 font-bold">Chapter {selected.number} Explainer Script</h3><div className="mt-1 text-[11px] text-slate-400">Explainer stays separate and is never sent to Manga Studio.</div></div></div><div className="mt-4 max-h-[620px] overflow-y-auto whitespace-pre-wrap text-sm leading-7 text-slate-700">{selected.explainer||"Explainer अभी generate नहीं हुआ।"}</div><div className="mt-4 rounded-lg bg-slate-50 p-3 text-xs text-slate-500"><div>Manga status: <strong>{selected.mangaStatus}</strong></div>{selected.error&&<div className="mt-1 text-red-600">{selected.error}</div>}<div className="mt-2">Ending state: {selected.endingState}</div>{selected.nextHook&&<div className="mt-1">Next hook: {selected.nextHook}</div>}</div></article>
         </div>:<div className="mt-4 rounded-xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-400">Generate Chapter 1 to start the chapter-by-chapter pipeline.</div>}
       </div>
     </div>
