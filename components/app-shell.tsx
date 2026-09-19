@@ -10,7 +10,6 @@ export function AppShell({children}:{children:React.ReactNode}){
   const path=usePathname();
   const {project}=useProject();
 
-  if(path==="/") return <>{children}</>;
 
   return <div className="min-h-screen lg:grid lg:grid-cols-[260px_1fr]">
     <aside className="border-b border-white/8 bg-black/20 p-4 backdrop-blur-xl lg:sticky lg:top-0 lg:h-screen lg:border-b-0 lg:border-r">
@@ -18,6 +17,6 @@ export function AppShell({children}:{children:React.ReactNode}){
       <nav className="grid grid-cols-3 gap-2 lg:grid-cols-1">{nav.map(([href,label,Icon])=><Link key={href} href={href} className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition ${path===href?"bg-white/10 text-white":"text-zinc-400 hover:bg-white/5 hover:text-white"}`}><Icon size={17}/><span className="hidden sm:inline">{label}</span></Link>)}</nav>
       <div className="mt-6 hidden rounded-2xl border border-white/8 bg-white/[.03] p-4 lg:block"><div className="text-xs uppercase tracking-wider text-zinc-500">Legacy active project</div><div className="mt-2 truncate text-sm font-semibold">{project.name}</div><div className="mt-1 text-xs text-zinc-500">{project.scenes.length} scenes · {project.characters.length} characters</div></div>
     </aside>
-    <main className="min-w-0"><header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-white/8 bg-[#08090c]/80 px-4 backdrop-blur-xl md:px-7"><div><div className="text-sm font-semibold">{project.storyTitle||project.name}</div><div className="text-xs text-zinc-500">{project.chapter} · {project.aspectRatio}</div></div><Link href="/" className="text-xs font-semibold text-violet-300">Open Continuity Studio</Link></header><div className="gridbg min-h-[calc(100vh-4rem)] p-4 md:p-7">{children}</div></main>
+    <main className="min-w-0"><header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-white/8 bg-white/90 px-4 text-slate-900 backdrop-blur-xl md:px-7"><div><div className="text-sm font-semibold">{path==="/"?"Manga Studio":project.storyTitle||project.name}</div><div className="text-xs text-slate-500">{path==="/"?"All workspace navigation stays available here.":`${project.chapter} · ${project.aspectRatio}`}</div></div>{path!=="/"&&<Link href="/" className="text-xs font-semibold text-violet-600">Open Manga Studio</Link>}</header><div className="gridbg min-h-[calc(100vh-4rem)] p-4 md:p-7">{children}</div></main>
   </div>;
 }
