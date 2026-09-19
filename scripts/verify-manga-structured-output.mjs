@@ -204,6 +204,11 @@ try{
   assert.match(storyGeneratorApiSource,/value\.continuityMemory\.length>=20/);
   assert.doesNotMatch(storyGeneratorApiSource,/z\.coerce\.boolean/);
   assert.match(studioSource,/storyframe:story-generator-result/);
+  assert.match(storyGeneratorSource,/Open in Manga Studio & Build/);
+  assert.match(storyGeneratorSource,/syncOnly/);
+  assert.match(storyGeneratorSource,/Explainer stays separate and is never sent to Manga Studio/);
+  assert.match(studioSource,/detail\.syncOnly/);
+  assert.match(studioSource,/synced:true/);
 
   console.log("Manga structured-output, one-page pacing, color-style, chapter-continuity and quota-queue regression checks passed.");
 }finally{

@@ -43,6 +43,7 @@ type StoryGeneratorCommand={
   story:string;
   summary:string;
   autoGenerateImages:boolean;
+  syncOnly?:boolean;
 };
 type ActiveStoryGeneratorCommand=StoryGeneratorCommand&{projectId:string;chapterId:string;phase:"build"|"images"};
 
@@ -77,7 +78,7 @@ export function MangaPageProductionStudio(){
 
 
   useEffect(()=>{
-    const sendResult=(detail:{requestId:string;ok:boolean;projectId?:string;chapterId?:string;message?:string})=>{
+    const sendResult=(detail:{requestId:string;ok:boolean;synced?:boolean;projectId?:string;chapterId?:string;message?:string})=>{
       window.dispatchEvent(new CustomEvent("storyframe:story-generator-result",{detail}));
     };
     const handler=(event:Event)=>{
@@ -108,6 +109,12 @@ export function MangaPageProductionStudio(){
         const chapterExists=targetProject.chapters.some((item)=>item.id===targetChapter.id);
         targetProject={...targetProject,analysisModel:detail.analysisModel,activeChapterId:targetChapter.id,chapters:chapterExists?targetProject.chapters.map((item)=>item.id===targetChapter.id?targetChapter:item):[...targetProject.chapters,targetChapter],updatedAt:now()};
         applyState((value)=>({...value,activeProjectId:targetProject!.id,projects:value.projects.map((item)=>item.id===targetProject!.id?targetProject!:item)}));
+      }
+
+      setTab("story");
+      if(detail.syncOnly){
+        sendResult({requestId:detail.requestId,ok:true,synced:true,projectId:targetProject.id,chapterId:targetChapter.id,message:`Chapter ${detail.chapterNumber} original story synced to Manga Studio.`});
+        return;
       }
 
       const existingProduction=targetChapter.manga;
