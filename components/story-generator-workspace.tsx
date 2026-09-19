@@ -43,6 +43,33 @@ export function StoryGeneratorWorkspace({view="generator",onOpenMangaStory}:{vie
   const [selectedChapterId,setSelectedChapterId]=useState("");
   const pendingMangaRef=useRef(new Map<string,{chapterId:string;mode:"sync"|"build"}>());
   const nextChapterRunnerRef=useRef<()=>Promise<void>>(async()=>{});
+  const generatorAbortRef=useRef<AbortController|null>(null);
+
+  const beginGeneratorRequest=()=>{
+    generatorAbortRef.current?.abort();
+    const controller=new AbortController();
+    generatorAbortRef.current=controller;
+    return controller;
+  };
+  const finishGeneratorRequest=(controller:AbortController)=>{
+    if(generatorAbortRef.current===controller)generatorAbortRef.current=null;
+  };
+  const isAbortError=(reason:unknown)=>reason instanceof DOMException&&reason.name==="AbortError";
+  const cancelGeneratorTask=()=>{
+    generatorAbortRef.current?.abort();
+    generatorAbortRef.current=null;
+    window.dispatchEvent(new CustomEvent("storyframe:cancel-manga-job"));
+    pendingMangaRef.current.clear();
+    const selectedId=selectedChapterId||stateRef.current.chapters.at(-1)?.id||"";
+    applyState((value)=>({
+      ...value,
+      running:false,
+      status:"Current task cancelled. Saved work was kept; use Retry / Resume to continue.",
+      error:"",
+      chapters:value.chapters.map((item)=>item.id===selectedId&&item.mangaStatus==="building"?{...item,mangaStatus:"error",error:"Cancelled by user. Resume from saved progress.",updatedAt:now()}:item),
+      updatedAt:now()
+    }));
+  };
 
   const applyState=(updater:(current:StoryGeneratorState)=>StoryGeneratorState)=>{
     const next=updater(stateRef.current);
@@ -114,6 +141,7 @@ export function StoryGeneratorWorkspace({view="generator",onOpenMangaStory}:{vie
   const generateOverview=async()=>{
     const current=stateRef.current;
     if(current.prompt.trim().length<20){update({error:"पहले Story Prompt में अपना concept/detail लिखो।"});return}
+    const controller=beginGeneratorRequest();
     update({running:true,status:"Creating story overview and long-form story bible…",error:""});
     try{
       const response=await fetch("/api/story-generator",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
@@ -122,12 +150,15 @@ export function StoryGeneratorWorkspace({view="generator",onOpenMangaStory}:{vie
         prompt:current.prompt,
         targetHours:current.targetHours,
         chapterWordTarget:current.chapterWordTarget
-      })});
+      }),signal:controller.signal});
       const data=await parseJsonResponse<OverviewResponse>(response);
       applyState((value)=>({...value,overview:data.data,chapters:[],mangaProjectId:undefined,running:false,status:"Story overview ready. Generate Chapter 1 when ready.",error:"",updatedAt:now()}));
       setSelectedChapterId("");
     }catch(error){
-      update({running:false,status:"",error:error instanceof Error?error.message:"Story overview generation failed."});
+      if(isAbortError(error))update({running:false,status:"Story overview generation cancelled. Your prompt was kept.",error:""});
+      else update({running:false,status:"",error:error instanceof Error?error.message:"Story overview generation failed."});
+    }finally{
+      finishGeneratorRequest(controller);
     }
   };
 
@@ -164,6 +195,7 @@ export function StoryGeneratorWorkspace({view="generator",onOpenMangaStory}:{vie
     if(current.chapters.at(-1)?.storyComplete){update({status:"Story already reached its planned ending.",error:""});return}
 
     const number=current.chapters.length+1;
+    const controller=beginGeneratorRequest();
     update({running:true,status:`Generating Chapter ${number}…`,error:""});
     try{
       const chapterResponse=await fetch("/api/story-generator",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
@@ -174,7 +206,7 @@ export function StoryGeneratorWorkspace({view="generator",onOpenMangaStory}:{vie
         previousSummaries:current.chapters.slice(-8).map((item)=>({number:item.number,title:item.title,summary:item.summary,endingState:item.endingState})),
         continuityMemory:current.chapters.at(-1)?.continuityMemory||"",
         totalWordsSoFar:current.chapters.reduce((sum,item)=>sum+item.wordCount,0)
-      })});
+      }),signal:controller.signal});
       const generated=(await parseJsonResponse<ChapterResponse>(chapterResponse)).data;
       const created:GeneratedStoryChapter={
         id:chapterId(number),
@@ -205,9 +237,10 @@ export function StoryGeneratorWorkspace({view="generator",onOpenMangaStory}:{vie
           chapterTitle:created.title,
           chapterStory:created.story,
           explainerPrompt:latest.explainerPrompt
-        })});
+        }),signal:controller.signal});
         explainer=(await parseJsonResponse<ExplainerResponse>(explainerResponse)).data.explainer;
       }catch(error){
+        if(isAbortError(error))throw error;
         explainerWarning=error instanceof Error?error.message:"Explainer generation failed.";
       }
       const saved=applyState((value)=>({...value,running:false,status:explainerWarning
@@ -221,7 +254,10 @@ export function StoryGeneratorWorkspace({view="generator",onOpenMangaStory}:{vie
       if(saved.autoGenerateManga)dispatchToMangaStudio(ready,"build");
       else dispatchToMangaStudio(ready,"sync");
     }catch(error){
-      update({running:false,status:"",error:error instanceof Error?error.message:`Chapter ${number} generation failed.`});
+      if(isAbortError(error))update({running:false,status:`Chapter ${number} generation cancelled. Any already-saved chapter text was kept.`,error:""});
+      else update({running:false,status:"",error:error instanceof Error?error.message:`Chapter ${number} generation failed.`});
+    }finally{
+      finishGeneratorRequest(controller);
     }
   };
 
@@ -276,7 +312,8 @@ export function StoryGeneratorWorkspace({view="generator",onOpenMangaStory}:{vie
           <div className="flex flex-wrap gap-2">
             {view==="generator"&&<button disabled={state.running} onClick={resetGenerator} className="rounded-xl border border-slate-200 px-3 py-2 text-sm disabled:opacity-40"><RotateCcw className="mr-1 inline" size={14}/> New Story</button>}
             {view==="chapters"&&<button disabled={state.running||!state.overview} onClick={()=>void generateNextChapter()} className="rounded-xl bg-violet-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-40">{state.running?<Loader2 className="mr-1 inline animate-spin" size={15}/>:<Play className="mr-1 inline" size={15}/>} Generate Next Chapter</button>}
-            {showRetry&&<button disabled={state.running} onClick={retryResume} className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-bold text-amber-800 disabled:opacity-40">Retry / Resume</button>}
+            {state.running&&<button onClick={cancelGeneratorTask} className="rounded-xl border border-red-300 bg-red-50 px-4 py-2 text-sm font-bold text-red-700">Cancel</button>}
+            {showRetry&&!state.running&&<button onClick={retryResume} className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-bold text-amber-800">Retry / Resume</button>}
           </div>
         </div>
         {state.status&&<div className="mt-4 rounded-xl border border-violet-200 bg-violet-50 p-3 text-sm text-violet-800">{state.running&&<Loader2 className="mr-2 inline animate-spin" size={14}/>} {state.status}</div>}
@@ -297,7 +334,7 @@ export function StoryGeneratorWorkspace({view="generator",onOpenMangaStory}:{vie
               <label className="flex items-center gap-2"><input type="checkbox" checked={state.autoGenerateManga} disabled={state.running} onChange={(e)=>update({autoGenerateManga:e.target.checked})}/> Auto run existing Manga pipeline</label>
               <label className="flex items-center gap-2"><input type="checkbox" checked={state.autoContinue} onChange={(e)=>update({autoContinue:e.target.checked})}/> Auto Continue to next chapter after completion</label>
             </div>
-            <button disabled={state.running||state.prompt.trim().length<20} onClick={()=>void generateOverview()} className="mt-4 rounded-xl bg-slate-900 px-4 py-3 text-sm font-bold text-white disabled:opacity-40"><Sparkles className="mr-1 inline" size={15}/> Generate Story Overview</button>
+            <div className="mt-4 flex gap-2"><button disabled={state.running||state.prompt.trim().length<20} onClick={()=>void generateOverview()} className="rounded-xl bg-slate-900 px-4 py-3 text-sm font-bold text-white disabled:opacity-40"><Sparkles className="mr-1 inline" size={15}/> Generate Story Overview</button>{state.running&&view==="generator"&&<button onClick={cancelGeneratorTask} className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">Cancel</button>}</div>
           </div>
 
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -321,7 +358,7 @@ export function StoryGeneratorWorkspace({view="generator",onOpenMangaStory}:{vie
             <div><div className="text-xs font-bold uppercase tracking-wide text-violet-600">Original Chapter {selected.number}</div><h3 className="mt-1 text-lg font-black">{selected.title}</h3><div className="mt-1 text-xs text-slate-400">{selected.wordCount} words · Manga: {selected.mangaStatus}</div></div>
             <div className="flex flex-wrap gap-2">
               {selected.mangaStatus==="error"&&<button disabled={state.running} onClick={retryResume} className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800 disabled:opacity-40">Retry / Resume</button>}
-              <button disabled={state.running||selected.mangaStatus==="building"} onClick={openSelectedInManga} className="rounded-lg bg-violet-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-40">{selected.mangaStatus==="complete"?"Open Manga Studio":"Open in Manga Studio & Build"}</button>
+              <button disabled={state.running||selected.mangaStatus==="building"} onClick={openSelectedInManga} className="rounded-lg bg-violet-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-40">{selected.mangaStatus==="complete"?"Open Manga Studio":"Open in Manga Studio & Build"}</button>{state.running&&selected.mangaStatus==="building"&&<button onClick={cancelGeneratorTask} className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs font-bold text-red-700">Cancel</button>}
             </div>
           </div>
           <div className="mt-4 max-h-[680px] overflow-y-auto whitespace-pre-wrap text-sm leading-7 text-slate-700">{selected.story}</div>
