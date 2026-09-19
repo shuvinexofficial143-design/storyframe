@@ -162,6 +162,8 @@ try{
   const homePageSource=fs.readFileSync(path.join(root,"app/page.tsx"),"utf8");
   const appShellSource=fs.readFileSync(path.join(root,"components/app-shell.tsx"),"utf8");
   const homeSource=fs.readFileSync(path.join(root,"app/page.tsx"),"utf8");
+  const storyGeneratorSource=fs.readFileSync(path.join(root,"components/story-generator-workspace.tsx"),"utf8");
+  const storyGeneratorApiSource=fs.readFileSync(path.join(root,"app/api/story-generator/route.ts"),"utf8");
   assert.match(typeSource,/"Full Color Manga"/);
   assert.match(presetSource,/COLOR MODE: FULL COLOR/);
   assert.match(presetSource,/no monochrome-only page/);
@@ -186,6 +188,14 @@ try{
   assert.match(studioSource,/storyframe:manga-job-status/);
   assert.doesNotMatch(studioSource,/tabs\.map\(\(\[id,label\]\)=>\<button key=\{id\} disabled=\{!!busy\}/);
   assert.match(homeSource,/return null/);
+  assert.match(appShellSource,/Story Generator/);
+  assert.match(appShellSource,/StoryGeneratorWorkspace/);
+  assert.match(storyGeneratorSource,/Generate Story Overview/);
+  assert.match(storyGeneratorSource,/Explainer Prompt/);
+  assert.match(storyGeneratorSource,/storyframe:story-generator-command/);
+  assert.match(storyGeneratorApiSource,/Write exactly ONE next chapter/);
+  assert.match(storyGeneratorApiSource,/Do not hard-cap chapter count/);
+  assert.match(studioSource,/storyframe:story-generator-result/);
 
   console.log("Manga structured-output, one-page pacing, color-style, chapter-continuity and quota-queue regression checks passed.");
 }finally{
