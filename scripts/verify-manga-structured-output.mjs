@@ -209,6 +209,11 @@ try{
   assert.match(storyGeneratorSource,/Explainer stays separate and is never sent to Manga Studio/);
   assert.match(studioSource,/detail\.syncOnly/);
   assert.match(studioSource,/synced:true/);
+  assert.match(studioSource,/requestPageChunkWithAutoRetry/);
+  assert.match(studioSource,/duplicated a story beat/);
+  assert.match(studioSource,/Auto-retrying/);
+  assert.match(storyGeneratorSource,/Original Chapter \{selected\.number\}/);
+  assert.match(storyGeneratorSource,/Open in Manga Studio & Build/);
 
   console.log("Manga structured-output, one-page pacing, color-style, chapter-continuity and quota-queue regression checks passed.");
 }finally{
