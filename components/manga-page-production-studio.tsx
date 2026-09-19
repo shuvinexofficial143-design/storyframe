@@ -46,6 +46,11 @@ export function MangaPageProductionStudio(){
   const [error,setError]=useState("");
   const [pacingPreset,setPacingPreset]=useState<MangaPacingPreset>("Balanced");
 
+  useEffect(()=>{
+    const fallback=busy==="master"?"Analyzing manga story…":busy==="planning"?"Planning manga pages…":busy==="all-pages"?"Generating manga pages…":busy?"Manga task is running…":"";
+    window.dispatchEvent(new CustomEvent("storyframe:manga-job-status",{detail:{busy:Boolean(busy),progress:progress||fallback}}));
+  },[busy,progress]);
+
   const applyState=(fn:(current:MangaStudioState)=>MangaStudioState)=>{
     const next=fn(stateRef.current);
     stateRef.current=next;
@@ -469,7 +474,7 @@ export function MangaPageProductionStudio(){
             </select>
           </div>
         </div>
-        <div className="mt-4 flex gap-2 overflow-x-auto">{tabs.map(([id,label])=><button key={id} disabled={!!busy} onClick={()=>setTab(id)} className={`whitespace-nowrap rounded-xl px-4 py-2 text-sm disabled:opacity-50 ${tab===id?"bg-violet-500 text-white":"bg-white/5 text-zinc-400"}`}>{label}</button>)}</div>
+        <div className="mt-4 flex gap-2 overflow-x-auto">{tabs.map(([id,label])=><button key={id} onClick={()=>setTab(id)} className={`whitespace-nowrap rounded-xl px-4 py-2 text-sm ${tab===id?"bg-violet-500 text-white":"bg-white/5 text-zinc-400"}`}>{label}</button>)}</div>
       </section>
 
       {progress&&<div className="rounded-2xl border border-violet-500/20 bg-violet-500/8 p-4 text-sm text-violet-200"><Loader2 className="mr-2 inline animate-spin" size={15}/>{progress}</div>}
