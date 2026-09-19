@@ -97,6 +97,16 @@ export function StoryGeneratorWorkspace({view="generator",onOpenMangaStory}:{vie
   },[state,hydrated]);
 
   useEffect(()=>{
+    window.dispatchEvent(new CustomEvent("storyframe:story-generator-job-status",{detail:{busy:state.running,progress:state.status}}));
+  },[state.running,state.status]);
+
+  useEffect(()=>{
+    const handler=()=>cancelGeneratorTask();
+    window.addEventListener("storyframe:cancel-story-generator-job",handler);
+    return()=>window.removeEventListener("storyframe:cancel-story-generator-job",handler);
+  });
+
+  useEffect(()=>{
     const handler=(event:Event)=>{
       const detail=(event as CustomEvent<MangaResult>).detail;
       if(!detail?.requestId)return;
