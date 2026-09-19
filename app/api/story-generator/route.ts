@@ -38,29 +38,53 @@ const ExplainerInput=z.object({
 
 const Input=z.discriminatedUnion("action",[OverviewInput,ChapterInput,ExplainerInput]);
 
+function readableStructuredText(value:unknown):string{
+  if(typeof value==="string")return value.trim();
+  if(typeof value==="number"||typeof value==="boolean")return String(value);
+  if(Array.isArray(value))return value.map((item)=>readableStructuredText(item)).filter(Boolean).join("\n");
+  if(value&&typeof value==="object"){
+    return Object.entries(value as Record<string,unknown>)
+      .map(([key,item])=>{
+        const text=readableStructuredText(item);
+        return text?`${key.replace(/([a-z])([A-Z])/g,"$1 $2")}: ${text}`:"";
+      })
+      .filter(Boolean)
+      .join("\n");
+  }
+  return "";
+}
+
+const FlexibleText=(min=0)=>z.preprocess((value)=>readableStructuredText(value),z.string().min(min));
+const FlexibleTextArray=z.preprocess((value)=>{
+  if(Array.isArray(value))return value.map((item)=>readableStructuredText(item)).filter(Boolean);
+  if(value&&typeof value==="object")return Object.entries(value as Record<string,unknown>).map(([key,item])=>`${key}: ${readableStructuredText(item)}`).filter(Boolean);
+  const text=readableStructuredText(value);
+  return text?[text]:[];
+},z.array(z.string()));
+
 const OverviewOutput=z.object({
-  title:z.string().min(1),
-  overview:z.string().min(20),
-  genre:z.string().default("Story"),
-  tone:z.string().default("cinematic"),
-  language:z.string().default("Hindi"),
-  storyBible:z.string().min(20),
-  majorArcs:z.array(z.string()).min(1),
-  endingDirection:z.string().min(10),
-  generationRules:z.array(z.string()).default([])
+  title:FlexibleText(1),
+  overview:FlexibleText(20),
+  genre:FlexibleText().default("Story"),
+  tone:FlexibleText().default("cinematic"),
+  language:FlexibleText().default("Hindi"),
+  storyBible:FlexibleText(20),
+  majorArcs:FlexibleTextArray.pipe(z.array(z.string()).min(1)),
+  endingDirection:FlexibleText(10),
+  generationRules:FlexibleTextArray.default([])
 });
 
 const ChapterOutput=z.object({
-  title:z.string().min(1),
-  story:z.string().min(200),
-  summary:z.string().min(20),
-  endingState:z.string().min(10),
-  nextHook:z.string().default(""),
-  continuityMemory:z.string().min(20),
-  storyComplete:z.boolean().default(false)
+  title:FlexibleText(1),
+  story:FlexibleText(200),
+  summary:FlexibleText(20),
+  endingState:FlexibleText(10),
+  nextHook:FlexibleText().default(""),
+  continuityMemory:FlexibleText(20),
+  storyComplete:z.coerce.boolean().default(false)
 });
 
-const ExplainerOutput=z.object({explainer:z.string().min(100)});
+const ExplainerOutput=z.object({explainer:FlexibleText(100)});
 
 const SYSTEM_OVERVIEW=`You are StoryFrame Long-Form Story Architect. Return strict JSON only. Design a long-running story from the user's concept without writing all chapters now. The story must be suitable for sequential chapter generation, manga adaptation and continuity over many chapters. Plan broad arcs, world rules, character progression, mysteries and the ending direction. Do not hard-cap chapter count; duration and natural pacing matter more than a fixed number.`;
 
