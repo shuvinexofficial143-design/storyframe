@@ -161,6 +161,7 @@ try{
   const workspaceSource=fs.readFileSync(path.join(root,"components/storyframe-workspace.tsx"),"utf8");
   const homePageSource=fs.readFileSync(path.join(root,"app/page.tsx"),"utf8");
   const appShellSource=fs.readFileSync(path.join(root,"components/app-shell.tsx"),"utf8");
+  const homeSource=fs.readFileSync(path.join(root,"app/page.tsx"),"utf8");
   assert.match(typeSource,/"Full Color Manga"/);
   assert.match(presetSource,/COLOR MODE: FULL COLOR/);
   assert.match(presetSource,/no monochrome-only page/);
@@ -180,6 +181,11 @@ try{
   assert.match(appShellSource,/Continuity Studio/);
   assert.match(appShellSource,/Projects/);
   assert.match(appShellSource,/Settings/);
+  assert.match(appShellSource,/StoryFrameWorkspace/);
+  assert.match(appShellSource,/storyframe:manga-job-status/);
+  assert.match(studioSource,/storyframe:manga-job-status/);
+  assert.doesNotMatch(studioSource,/tabs\.map\(\(\[id,label\]\)=>\<button key=\{id\} disabled=\{!!busy\}/);
+  assert.match(homeSource,/return null/);
 
   console.log("Manga structured-output, one-page pacing, color-style, chapter-continuity and quota-queue regression checks passed.");
 }finally{
