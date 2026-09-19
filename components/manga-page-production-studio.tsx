@@ -32,6 +32,19 @@ type MasterResponse={kind:"master";data:MangaMasterAnalysis};
 type PagesResponse={kind:"pages";data:MangaPagePlan};
 type Tab="story"|"characters"|"locations"|"script"|"pages"|"export"|"download";
 type ReferenceView="primary"|"full-body"|"three-quarter"|"side"|"sheet";
+type StoryGeneratorCommand={
+  requestId:string;
+  projectId?:string;
+  existingChapterId?:string;
+  newProjectName?:string;
+  analysisModel:MangaProject["analysisModel"];
+  chapterNumber:number;
+  title:string;
+  story:string;
+  summary:string;
+  autoGenerateImages:boolean;
+};
+type ActiveStoryGeneratorCommand=StoryGeneratorCommand&{projectId:string;chapterId:string;phase:"build"|"images"};
 
 const beatDetailLabel=(preset:MangaPacingPreset)=>preset==="Fast"?"Low":preset==="Balanced"?"Standard":"Highest";
 
@@ -45,6 +58,10 @@ export function MangaPageProductionStudio(){
   const [notice,setNotice]=useState("");
   const [error,setError]=useState("");
   const [pacingPreset,setPacingPreset]=useState<MangaPacingPreset>("Balanced");
+  const busyRef=useRef(busy);
+  busyRef.current=busy;
+  const storyGeneratorCommandRef=useRef<ActiveStoryGeneratorCommand|null>(null);
+  const storyGeneratorRunnerRef=useRef<()=>Promise<void>>(async()=>{});
 
   useEffect(()=>{
     const fallback=busy==="master"?"Analyzing manga story…":busy==="planning"?"Planning manga pages…":busy==="all-pages"?"Generating manga pages…":busy?"Manga task is running…":"";
@@ -56,6 +73,57 @@ export function MangaPageProductionStudio(){
     stateRef.current=next;
     setState(next);
   };
+
+
+  useEffect(()=>{
+    const sendResult=(detail:{requestId:string;ok:boolean;projectId?:string;chapterId?:string;message?:string})=>{
+      window.dispatchEvent(new CustomEvent("storyframe:story-generator-result",{detail}));
+    };
+    const handler=(event:Event)=>{
+      const detail=(event as CustomEvent<StoryGeneratorCommand>).detail;
+      if(!detail?.requestId||!detail.story||!detail.title)return;
+      if(busyRef.current){
+        sendResult({requestId:detail.requestId,ok:false,projectId:detail.projectId,chapterId:detail.existingChapterId,message:"Manga Studio is already processing another job. Retry this chapter after the current job finishes."});
+        return;
+      }
+
+      const current=stateRef.current;
+      let targetProject=detail.projectId?current.projects.find((item)=>item.id===detail.projectId):undefined;
+      let targetChapter:MangaChapter;
+
+      if(!targetProject){
+        const created=createProject(detail.newProjectName||"Generated Manga Story");
+        targetChapter={...created.chapters[0],title:`Chapter ${detail.chapterNumber}: ${detail.title}`,story:detail.story,summary:detail.summary,updatedAt:now()};
+        targetProject={...created,analysisModel:detail.analysisModel,activeChapterId:targetChapter.id,chapters:[targetChapter],updatedAt:now()};
+        applyState((value)=>({...value,activeProjectId:targetProject!.id,projects:[...value.projects,targetProject!]}));
+      }else{
+        const existing=detail.existingChapterId?targetProject.chapters.find((item)=>item.id===detail.existingChapterId):undefined;
+        if(existing){
+          targetChapter={...existing,title:`Chapter ${detail.chapterNumber}: ${detail.title}`,story:detail.story,summary:detail.summary,updatedAt:now()};
+        }else{
+          const created=createChapter(`Chapter ${detail.chapterNumber}: ${detail.title}`);
+          targetChapter={...created,story:detail.story,summary:detail.summary,updatedAt:now()};
+        }
+        const chapterExists=targetProject.chapters.some((item)=>item.id===targetChapter.id);
+        targetProject={...targetProject,analysisModel:detail.analysisModel,activeChapterId:targetChapter.id,chapters:chapterExists?targetProject.chapters.map((item)=>item.id===targetChapter.id?targetChapter:item):[...targetProject.chapters,targetChapter],updatedAt:now()};
+        applyState((value)=>({...value,activeProjectId:targetProject!.id,projects:value.projects.map((item)=>item.id===targetProject!.id?targetProject!:item)}));
+      }
+
+      const existingProduction=targetChapter.manga;
+      storyGeneratorCommandRef.current={
+        ...detail,
+        projectId:targetProject.id,
+        chapterId:targetChapter.id,
+        phase:existingProduction?.pages.length&&existingProduction.nextBeatIndex>=existingProduction.beats.length?"images":"build"
+      };
+    };
+    window.addEventListener("storyframe:story-generator-command",handler);
+    return()=>window.removeEventListener("storyframe:story-generator-command",handler);
+  },[]);
+
+  useEffect(()=>{
+    if(storyGeneratorCommandRef.current&&!busy)void storyGeneratorRunnerRef.current();
+  },[state,busy]);
 
   useEffect(()=>{
     try{
@@ -380,6 +448,55 @@ export function MangaPageProductionStudio(){
     }finally{
       setBusy("");setProgress("");
     }
+  };
+
+  const finishStoryGeneratorCommand=(ok:boolean,message:string)=>{
+    const command=storyGeneratorCommandRef.current;
+    if(!command)return;
+    storyGeneratorCommandRef.current=null;
+    window.dispatchEvent(new CustomEvent("storyframe:story-generator-result",{detail:{requestId:command.requestId,ok,projectId:command.projectId,chapterId:command.chapterId,message}}));
+  };
+
+  storyGeneratorRunnerRef.current=async()=>{
+    const command=storyGeneratorCommandRef.current;
+    if(!command||busyRef.current)return;
+
+    const current=stateRef.current;
+    const targetProject=current.projects.find((item)=>item.id===command.projectId);
+    const targetChapter=targetProject?.chapters.find((item)=>item.id===command.chapterId);
+    if(!targetProject||!targetChapter){
+      finishStoryGeneratorCommand(false,"Generated chapter could not be found in Manga Studio.");
+      return;
+    }
+    if(current.activeProjectId!==command.projectId||targetProject.activeChapterId!==command.chapterId){
+      applyState((value)=>({...value,activeProjectId:command.projectId,projects:value.projects.map((item)=>item.id===command.projectId?{...item,activeChapterId:command.chapterId}:item)}));
+      return;
+    }
+
+    if(command.phase==="build"){
+      await buildManga();
+      const latest=stateRef.current.projects.find((item)=>item.id===command.projectId)?.chapters.find((item)=>item.id===command.chapterId)?.manga;
+      if(!latest||!latest.beats.length||latest.nextBeatIndex<latest.beats.length||!latest.pages.length){
+        finishStoryGeneratorCommand(false,"Existing Manga Studio analysis/page planning did not complete for this chapter.");
+        return;
+      }
+      if(!command.autoGenerateImages){
+        finishStoryGeneratorCommand(true,"Chapter analysis and manga page planning complete.");
+        return;
+      }
+      storyGeneratorCommandRef.current={...command,phase:"images"};
+      setTimeout(()=>void storyGeneratorRunnerRef.current(),80);
+      return;
+    }
+
+    await generateAllPages();
+    const latest=stateRef.current.projects.find((item)=>item.id===command.projectId)?.chapters.find((item)=>item.id===command.chapterId)?.manga;
+    const incomplete=latest?.pages.filter((page)=>!page.composedImageDataUrl)||[];
+    if(!latest?.pages.length||incomplete.length){
+      finishStoryGeneratorCommand(false,`Manga image generation stopped with ${incomplete.length||"some"} page(s) unfinished. Existing Manga Studio can resume from the first unfinished page.`);
+      return;
+    }
+    finishStoryGeneratorCommand(true,`Chapter ${command.chapterNumber} manga complete.`);
   };
 
   const generateReference=async(character:CharacterReference,view:ReferenceView)=>{
