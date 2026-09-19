@@ -59,6 +59,7 @@ export function MangaPageProductionStudio(){
   const [error,setError]=useState("");
   const [pacingPreset,setPacingPreset]=useState<MangaPacingPreset>("Balanced");
   const busyRef=useRef(busy);
+  // eslint-disable-next-line react-hooks/refs -- imperative browser-event bridge reads the latest busy state without re-subscribing.
   busyRef.current=busy;
   const storyGeneratorCommandRef=useRef<ActiveStoryGeneratorCommand|null>(null);
   const storyGeneratorRunnerRef=useRef<()=>Promise<void>>(async()=>{});
@@ -457,6 +458,7 @@ export function MangaPageProductionStudio(){
     window.dispatchEvent(new CustomEvent("storyframe:story-generator-result",{detail:{requestId:command.requestId,ok,projectId:command.projectId,chapterId:command.chapterId,message}}));
   };
 
+  // eslint-disable-next-line react-hooks/refs -- keep the command runner pointed at the latest render closures.
   storyGeneratorRunnerRef.current=async()=>{
     const command=storyGeneratorCommandRef.current;
     if(!command||busyRef.current)return;
