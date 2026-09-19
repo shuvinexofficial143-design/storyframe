@@ -217,6 +217,7 @@ try{
   assert.match(studioSource,/command\.phase==="planning"/);
   assert.match(studioSource,/beginCancelableTask/);
   assert.match(studioSource,/cancelCurrentTask/);
+  assert.match(studioSource,/busy\.startsWith\(`ref-\$\{character\.id\}-`\)/);
   assert.match(studioSource,/storyframe:cancel-manga-job/);
   assert.match(studioSource,/signal:controller\.signal/);
   assert.match(storyGeneratorSource,/cancelGeneratorTask/);
