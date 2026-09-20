@@ -1,18 +1,16 @@
 "use client";
 
 import {useEffect,useMemo,useRef,useState} from "react";
-import {Download,Loader2,Play,RotateCcw,Sparkles,Volume2,WandSparkles} from "lucide-react";
+import {Check,Copy,Loader2,Play,RotateCcw,Sparkles,WandSparkles} from "lucide-react";
 import {parseJsonResponse} from "@/lib/fetch-json";
 import {DEFAULT_STORY_ANALYSIS_MODEL,STORY_ANALYSIS_MODEL_OPTIONS,type StoryAnalysisModel} from "@/lib/story-analysis-models";
 import {loadStoryGeneratorState,saveStoryGeneratorState} from "@/lib/story-generator/storage";
 import type {GeneratedStoryChapter,StoryGeneratorState,StoryOverview} from "@/lib/story-generator/types";
-import {DEFAULT_TTS_STYLE,DEFAULT_TTS_VOICE,STORYFRAME_TTS_VOICES,type StoryframeTtsVoice} from "@/lib/tts-voices";
 
 type OverviewResponse={kind:"overview";data:StoryOverview};
 type ChapterResponse={kind:"chapter";data:{title:string;story:string;summary:string;endingState:string;nextHook:string;continuityMemory:string;storyComplete:boolean;provider?:string}};
 type ExplainerResponse={kind:"explainer";data:{explainer:string;provider?:string}};
 type MangaResult={requestId:string;ok:boolean;synced?:boolean;projectId?:string;chapterId?:string;message?:string};
-type TtsResponse={kind:"chapter"|"combined";mediaId:string;audioUrl:string;downloadUrl:string;voice?:string;chunks?:number;bytes:number};
 
 const now=()=>new Date().toISOString();
 const defaultExplainerPrompt="इस chapter को engaging Hindi YouTube/anime story explainer की तरह समझाओ। शुरुआत strong hook से करो, chronology साफ रखो, important action/reactions detail में बताओ, unnecessary description छोटा रखो और suspense natural तरीके से build करो।";
@@ -25,9 +23,7 @@ const initialState=():StoryGeneratorState=>({
   analysisModel:DEFAULT_STORY_ANALYSIS_MODEL,
   autoContinue:false,
   autoGenerateManga:true,
-  autoGenerateTts:true,
-  ttsVoice:DEFAULT_TTS_VOICE,
-  ttsStylePrompt:DEFAULT_TTS_STYLE,
+  autoGenerateTts:false,
   chapters:[],
   running:false,
   status:"",
@@ -46,7 +42,9 @@ export function StoryGeneratorWorkspace({view="generator",onOpenMangaStory,onPip
   const stateRef=useRef(state);
   const [hydrated,setHydrated]=useState(false);
   const [selectedChapterId,setSelectedChapterId]=useState("");
-  const [ttsBusy,setTtsBusy]=useState("");
+  const [copyFrom,setCopyFrom]=useState(1);
+  const [copyTo,setCopyTo]=useState(1);
+  const [copyStatus,setCopyStatus]=useState("");
   const pendingMangaRef=useRef(new Map<string,{chapterId:string;mode:"sync"|"build"}>());
   const nextChapterRunnerRef=useRef<()=>Promise<void>>(async()=>{});
   const generatorAbortRef=useRef<AbortController|null>(null);
@@ -154,51 +152,63 @@ export function StoryGeneratorWorkspace({view="generator",onOpenMangaStory,onPip
 
   const update=(patch:Partial<StoryGeneratorState>)=>applyState((current)=>({...current,...patch,updatedAt:now()}));
 
-  const requestChapterAudio=async(chapter:GeneratedStoryChapter,current=stateRef.current,signal?:AbortSignal)=>{
-    if(!chapter.explainer.trim())throw new Error("इस chapter का explainer अभी तैयार नहीं है।");
-    const response=await fetch("/api/tts",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
-      action:"generate",
-      text:chapter.explainer,
-      voice:(current.ttsVoice||DEFAULT_TTS_VOICE) as StoryframeTtsVoice,
-      stylePrompt:current.ttsStylePrompt||DEFAULT_TTS_STYLE,
-      chapterNumber:chapter.number,
-      chapterTitle:chapter.title,
-      projectName:current.overview?.title||"StoryFrame"
-    }),signal});
-    return parseJsonResponse<TtsResponse>(response);
+  const explainerChapters=useMemo(()=>state.chapters.filter((item)=>item.explainer.trim()).sort((a,b)=>a.number-b.number),[state.chapters]);
+
+  useEffect(()=>{
+    if(!explainerChapters.length)return;
+    setCopyFrom((value)=>explainerChapters.some((item)=>item.number===value)?value:explainerChapters[0].number);
+    setCopyTo((value)=>explainerChapters.some((item)=>item.number===value)?value:explainerChapters.at(-1)!.number);
+  },[explainerChapters]);
+
+  const formatExplainersForCopy=(from:number,to:number)=>{
+    const start=Math.min(from,to);
+    const end=Math.max(from,to);
+    return explainerChapters
+      .filter((item)=>item.number>=start&&item.number<=end)
+      .map((item)=>`Chapter ${item.number}: ${item.title}\n\n${item.explainer.trim()}`)
+      .join("\n\n━━━━━━━━━━━━━━━━━━━━\n\n");
   };
 
-  const generateChapterAudio=async(chapter:GeneratedStoryChapter)=>{
-    if(ttsBusy)return;
-    setTtsBusy(chapter.id);
-    applyState((value)=>({...value,chapters:value.chapters.map((item)=>item.id===chapter.id?{...item,ttsStatus:"generating",ttsError:undefined,updatedAt:now()}:item),updatedAt:now()}));
+  const writeClipboard=async(text:string)=>{
+    if(!text.trim())throw new Error("Copy करने के लिए explainer text नहीं मिला।");
+    if(navigator.clipboard?.writeText){
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+    const area=document.createElement("textarea");
+    area.value=text;
+    area.style.position="fixed";
+    area.style.opacity="0";
+    document.body.appendChild(area);
+    area.focus();
+    area.select();
+    const ok=document.execCommand("copy");
+    area.remove();
+    if(!ok)throw new Error("Clipboard copy failed.");
+  };
+
+  const copyExplainerRange=async(from:number,to:number,label:string)=>{
     try{
-      const data=await requestChapterAudio(chapter);
-      applyState((value)=>({...value,chapters:value.chapters.map((item)=>item.id===chapter.id?{...item,ttsStatus:"complete",ttsVoice:data.voice||value.ttsVoice||DEFAULT_TTS_VOICE,ttsMediaId:data.mediaId,ttsAudioUrl:data.audioUrl,ttsError:undefined,updatedAt:now()}:item),updatedAt:now()}));
+      const text=formatExplainersForCopy(from,to);
+      await writeClipboard(text);
+      const count=explainerChapters.filter((item)=>item.number>=Math.min(from,to)&&item.number<=Math.max(from,to)).length;
+      setCopyStatus(`${label}: ${count} chapter${count===1?"":"s"} copied`);
+      setTimeout(()=>setCopyStatus(""),2200);
     }catch(error){
-      applyState((value)=>({...value,chapters:value.chapters.map((item)=>item.id===chapter.id?{...item,ttsStatus:"error",ttsError:error instanceof Error?error.message:"Voice generation failed",updatedAt:now()}:item),updatedAt:now()}));
-    }finally{setTtsBusy("")}
+      setCopyStatus(error instanceof Error?error.message:"Copy failed.");
+      setTimeout(()=>setCopyStatus(""),2800);
+    }
   };
 
-  const generateAllChapterAudio=async()=>{
-    if(ttsBusy)return;
-    const candidates=stateRef.current.chapters.filter((item)=>item.explainer.trim());
-    if(!candidates.length){update({error:"पहले कम से कम एक chapter explainer generate करो।"});return}
-    setTtsBusy("all");
+  const copySingleExplainer=async(chapter:GeneratedStoryChapter)=>{
     try{
-      for(const source of candidates){
-        const latest=stateRef.current.chapters.find((item)=>item.id===source.id)||source;
-        if(latest.ttsMediaId&&latest.ttsAudioUrl)continue;
-        applyState((value)=>({...value,status:`Generating voice for Chapter ${source.number}…`,chapters:value.chapters.map((item)=>item.id===source.id?{...item,ttsStatus:"generating",ttsError:undefined,updatedAt:now()}:item),updatedAt:now()}));
-        const data=await requestChapterAudio(latest,stateRef.current);
-        applyState((value)=>({...value,chapters:value.chapters.map((item)=>item.id===source.id?{...item,ttsStatus:"complete",ttsVoice:data.voice||value.ttsVoice||DEFAULT_TTS_VOICE,ttsMediaId:data.mediaId,ttsAudioUrl:data.audioUrl,updatedAt:now()}:item),updatedAt:now()}));
-      }
-      const ready=stateRef.current.chapters.filter((item)=>item.ttsMediaId).sort((a,b)=>a.number-b.number);
-      const response=await fetch("/api/tts",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"combine",mediaIds:ready.map((item)=>item.ttsMediaId),projectName:stateRef.current.overview?.title||"StoryFrame"})});
-      const combined=await parseJsonResponse<TtsResponse>(response);
-      update({combinedAudioMediaId:combined.mediaId,combinedAudioUrl:combined.audioUrl,status:`Combined audio ready for ${ready.length} chapters.`,error:""});
-    }catch(error){update({error:error instanceof Error?error.message:"All chapter audio generation failed."})}
-    finally{setTtsBusy("")}
+      await writeClipboard(`Chapter ${chapter.number}: ${chapter.title}\n\n${chapter.explainer.trim()}`);
+      setCopyStatus(`Chapter ${chapter.number} copied`);
+      setTimeout(()=>setCopyStatus(""),2200);
+    }catch(error){
+      setCopyStatus(error instanceof Error?error.message:"Copy failed.");
+      setTimeout(()=>setCopyStatus(""),2800);
+    }
   };
 
   const generateOverview=async()=>{
@@ -315,18 +325,6 @@ export function StoryGeneratorWorkspace({view="generator",onOpenMangaStory,onPip
         chapters:value.chapters.map((item)=>item.id===created.id?{...item,explainer,ttsStatus:explainer?"idle":item.ttsStatus,updatedAt:now()}:item),
         updatedAt:now()}));
 
-      if(saved.autoGenerateTts!==false&&explainer){
-        applyState((value)=>({...value,running:true,status:`Chapter ${number}: generating AI narration…`,chapters:value.chapters.map((item)=>item.id===created.id?{...item,ttsStatus:"generating",ttsError:undefined,updatedAt:now()}:item),updatedAt:now()}));
-        try{
-          const chapterForAudio=stateRef.current.chapters.find((item)=>item.id===created.id)!;
-          const voiceData=await requestChapterAudio(chapterForAudio,stateRef.current,controller.signal);
-          saved=applyState((value)=>({...value,running:false,status:`Chapter ${number}: explainer voice ready.`,chapters:value.chapters.map((item)=>item.id===created.id?{...item,ttsStatus:"complete",ttsVoice:voiceData.voice||value.ttsVoice||DEFAULT_TTS_VOICE,ttsMediaId:voiceData.mediaId,ttsAudioUrl:voiceData.audioUrl,ttsError:undefined,updatedAt:now()}:item),updatedAt:now()}));
-        }catch(error){
-          if(isAbortError(error))throw error;
-          saved=applyState((value)=>({...value,running:false,status:`Chapter ${number}: explainer ready; voice generation can be retried.`,chapters:value.chapters.map((item)=>item.id===created.id?{...item,ttsStatus:"error",ttsError:error instanceof Error?error.message:"Voice generation failed",updatedAt:now()}:item),updatedAt:now()}));
-        }
-      }
-
       const ready=saved.chapters.find((item)=>item.id===created.id)!;
       onPipelineStage?.("story");
 
@@ -411,7 +409,6 @@ export function StoryGeneratorWorkspace({view="generator",onOpenMangaStory,onPip
             </div>
             <div className="mt-4 flex flex-wrap gap-5 text-sm">
               <label className="flex items-center gap-2"><input type="checkbox" checked={state.autoGenerateManga} disabled={state.running} onChange={(e)=>update({autoGenerateManga:e.target.checked})}/> Auto run existing Manga pipeline</label>
-              <label className="flex items-center gap-2"><input type="checkbox" checked={state.autoGenerateTts!==false} disabled={state.running} onChange={(e)=>update({autoGenerateTts:e.target.checked})}/> Auto generate explainer voice</label>
               <label className="flex items-center gap-2"><input type="checkbox" checked={state.autoContinue} onChange={(e)=>update({autoContinue:e.target.checked})}/> Auto Continue to next chapter after completion</label>
             </div>
             <div className="mt-4 flex gap-2"><button disabled={state.running||state.prompt.trim().length<20} onClick={()=>void generateOverview()} className="rounded-xl bg-slate-900 px-4 py-3 text-sm font-bold text-white disabled:opacity-40"><Sparkles className="mr-1 inline" size={15}/> Generate Story Overview</button>{state.running&&view==="generator"&&<button onClick={cancelGeneratorTask} className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">Cancel</button>}</div>
@@ -453,15 +450,28 @@ export function StoryGeneratorWorkspace({view="generator",onOpenMangaStory,onPip
           <textarea disabled={state.running} value={state.explainerPrompt} onChange={(e)=>update({explainerPrompt:e.target.value})} className="mt-3 min-h-40 w-full rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 outline-none focus:border-violet-400"/>
 
           <div className="mt-5 rounded-xl border border-violet-200 bg-violet-50/60 p-4">
-            <div className="flex items-center gap-2 font-bold text-violet-900"><Volume2 size={16}/> AI Narrator Voice</div>
-            <label className="mt-3 block text-xs font-semibold text-slate-600">Voice<select disabled={!!ttsBusy||state.running} value={state.ttsVoice||DEFAULT_TTS_VOICE} onChange={(e)=>update({ttsVoice:e.target.value})} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">{STORYFRAME_TTS_VOICES.map((voice)=><option key={voice.id} value={voice.id}>{voice.label}</option>)}</select></label>
-            <label className="mt-3 block text-xs font-semibold text-slate-600">Narration Style<textarea disabled={!!ttsBusy||state.running} value={state.ttsStylePrompt||DEFAULT_TTS_STYLE} onChange={(e)=>update({ttsStylePrompt:e.target.value})} className="mt-1 min-h-24 w-full rounded-lg border border-slate-200 bg-white p-3 text-xs leading-5"/></label>
-            <label className="mt-3 flex items-center gap-2 text-xs font-semibold text-slate-700"><input type="checkbox" checked={state.autoGenerateTts!==false} onChange={(e)=>update({autoGenerateTts:e.target.checked})}/> Explainer बनते ही voice भी अपने-आप generate करो</label>
-            <div className="mt-4 flex flex-wrap gap-2">
-              <button disabled={!!ttsBusy||!state.chapters.some((item)=>item.explainer.trim())} onClick={()=>void generateAllChapterAudio()} className="rounded-lg bg-violet-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-40">{ttsBusy==="all"?<Loader2 className="mr-1 inline animate-spin" size={13}/>:<Volume2 className="mr-1 inline" size={13}/>} Generate Missing + Combine All</button>
-              {state.combinedAudioUrl&&<a href={state.combinedAudioUrl+"?download=1"} className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800"><Download className="mr-1 inline" size={13}/> Download All Chapters MP3</a>}
-            </div>
-            {state.combinedAudioUrl&&<audio controls preload="metadata" src={state.combinedAudioUrl} className="mt-3 w-full"/>}
+            <div className="flex items-center gap-2 font-bold text-violet-900"><Copy size={16}/> Copy Explainers</div>
+            <p className="mt-1 text-xs text-slate-500">सभी chapter explainers एक साथ copy करो या chapter range चुनकर copy करो।</p>
+
+            {explainerChapters.length?<div className="mt-4 space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <label className="text-xs font-semibold text-slate-600">From Chapter
+                  <select value={copyFrom} onChange={(e)=>setCopyFrom(Number(e.target.value))} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+                    {explainerChapters.map((item)=><option key={item.id} value={item.number}>Chapter {item.number}</option>)}
+                  </select>
+                </label>
+                <label className="text-xs font-semibold text-slate-600">To Chapter
+                  <select value={copyTo} onChange={(e)=>setCopyTo(Number(e.target.value))} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+                    {explainerChapters.map((item)=><option key={item.id} value={item.number}>Chapter {item.number}</option>)}
+                  </select>
+                </label>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button onClick={()=>void copyExplainerRange(copyFrom,copyTo,"Selected range")} className="rounded-lg bg-violet-600 px-3 py-2 text-xs font-bold text-white"><Copy className="mr-1 inline" size={13}/> Copy Selected Range</button>
+                <button onClick={()=>void copyExplainerRange(explainerChapters[0].number,explainerChapters.at(-1)!.number,"All explainers")} className="rounded-lg border border-violet-300 bg-white px-3 py-2 text-xs font-bold text-violet-800"><Copy className="mr-1 inline" size={13}/> Copy All Chapters</button>
+              </div>
+              {copyStatus&&<div className="flex items-center gap-1 rounded-lg bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700"><Check size={13}/>{copyStatus}</div>}
+            </div>:<div className="mt-3 rounded-lg border border-dashed border-violet-200 bg-white p-4 text-center text-xs text-slate-400">अभी कोई explainer text उपलब्ध नहीं है।</div>}
           </div>
 
           <div className="mt-4">{chapterTabs}</div>
@@ -471,16 +481,8 @@ export function StoryGeneratorWorkspace({view="generator",onOpenMangaStory,onPip
           <h3 className="mt-1 font-bold">{selected?("Chapter "+selected.number+": "+selected.title):"No chapter selected"}</h3>
           <div className="mt-1 text-[11px] text-slate-400">Explainer stays separate and is never sent to Manga Studio.</div>
 
-          {selected&&<div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div><div className="text-xs font-bold text-slate-700">AI Voice Recording</div><div className="mt-1 text-[11px] text-slate-400">{selected.ttsStatus==="complete"?("Ready · "+(selected.ttsVoice||state.ttsVoice||DEFAULT_TTS_VOICE)):selected.ttsStatus==="generating"?"Generating…":selected.ttsStatus==="error"?"Generation failed · Retry available":"Not generated yet"}</div></div>
-              <div className="flex flex-wrap gap-2">
-                <button disabled={!selected.explainer.trim()||!!ttsBusy||state.running} onClick={()=>void generateChapterAudio(selected)} className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white disabled:opacity-40">{ttsBusy===selected.id?<Loader2 className="mr-1 inline animate-spin" size={13}/>:<Volume2 className="mr-1 inline" size={13}/>} {selected.ttsAudioUrl?"Regenerate Voice":"Generate Voice"}</button>
-                {selected.ttsAudioUrl&&<a href={selected.ttsAudioUrl+"?download=1"} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700"><Download className="mr-1 inline" size={13}/> Download MP3</a>}
-              </div>
-            </div>
-            {selected.ttsAudioUrl&&<audio controls preload="metadata" src={selected.ttsAudioUrl} className="mt-3 w-full"/>}
-            {selected.ttsError&&<div className="mt-2 rounded-lg bg-red-50 p-2 text-xs text-red-700">{selected.ttsError}</div>}
+          {selected&&<div className="mt-4 flex flex-wrap justify-end gap-2">
+            <button disabled={!selected.explainer.trim()} onClick={()=>void copySingleExplainer(selected)} className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white disabled:opacity-40"><Copy className="mr-1 inline" size={13}/> Copy This Chapter</button>
           </div>}
 
           <div className="mt-4 max-h-[680px] overflow-y-auto whitespace-pre-wrap text-sm leading-7 text-slate-700">{selected?.explainer||"इस chapter का explainer अभी generate नहीं हुआ।"}</div>
