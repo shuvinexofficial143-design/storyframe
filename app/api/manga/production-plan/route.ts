@@ -87,13 +87,13 @@ export async function POST(request:Request){
     if(data.action==="master"){
       const masterData=data;
 
-      // A 429 from Standard PayGo is normally temporary shared-capacity contention,
-      // not a one-minute fixed quota reset. Retry only quick rate-limit failures here;
-      // timeouts still fall back immediately so the 300s Vercel budget is protected.
+      // Gemini-only analysis: never switch providers automatically.
+      // Capacity errors retry the same Gemini model after 6s, 12s and 24s.
+      // Real model timeouts get one controlled retry so the Vercel budget is not exhausted.
       const result=await withStoryModelFallback({
         model:analysisModel,
-        retryDelaysMs:[1_000,2_000,4_000,8_000],
-        retryOnlyRateLimit:true,
+        retryDelaysMs:[6_000,12_000,24_000],
+        retryOnlyRateLimit:false,
         run:async(model)=>{
           const masterInput={...masterData,analysisModel:model};
           return shouldUseLongStoryAnalysis(masterData.story)
@@ -102,13 +102,9 @@ export async function POST(request:Request){
         }
       });
 
-      // Pacing refinement is intentionally outside the fallback wrapper. A
-      // refinement failure must never cause the entire expensive master analysis
-      // to run again. When fallback was already needed, return that valid master
-      // immediately and let page planning preserve its beat order/continuity.
-      const refined=result.fallbackUsed
-        ?result.data
-        :await refineMangaMasterForPacing({analysisModel:result.model,pacingPreset:masterData.pacingPreset,story:masterData.story,master:result.data});
+      // Pacing refinement is intentionally outside the retry wrapper so a
+      // refinement failure never reruns the expensive master analysis.
+      const refined=await refineMangaMasterForPacing({analysisModel:result.model,pacingPreset:masterData.pacingPreset,story:masterData.story,master:result.data});
 
       return NextResponse.json({kind:"master",data:{...refined,provider:providerLabel(result.model,result.fallbackUsed,masterData.pacingPreset)}});
     }

@@ -119,23 +119,27 @@ try{
 
   assert.equal(isRetryableVertexStoryFailure(new Error("Vertex Gemini story request failed (429): Resource exhausted.")),true);
   assert.equal(isRetryableVertexStoryFailure(new Error("Vertex Gemini story request failed (400): bad request")),false);
-  const oldKey=process.env.XKIRO_API_KEY;
-  process.env.XKIRO_API_KEY="regression-test-key";
   const attempted=[];
   const retryDelays=[];
-  const fallbackResult=await withStoryModelFallback({
-    model:"google/gemini-3.1-pro-preview",
-    sleep:async(ms)=>{retryDelays.push(ms)},
-    run:async(model)=>{
-      attempted.push(model);
-      if(model==="google/gemini-3.1-pro-preview")throw new Error("Vertex Gemini story request failed (429): Resource exhausted.");
-      return "planned";
-    }
-  });
-  assert.deepEqual(retryDelays,[1000,2000,4000,8000]);
-  assert.deepEqual(attempted,["google/gemini-3.1-pro-preview","google/gemini-3.1-pro-preview","google/gemini-3.1-pro-preview","google/gemini-3.1-pro-preview","google/gemini-3.1-pro-preview","mistralai/mistral-large-2512"]);
-  assert.equal(fallbackResult.data,"planned");
-  assert.equal(fallbackResult.fallbackUsed,true);
+  let terminalError="";
+  try{
+    await withStoryModelFallback({
+      model:"google/gemini-3.1-pro-preview",
+      sleep:async(ms)=>{retryDelays.push(ms)},
+      run:async(model)=>{
+        attempted.push(model);
+        throw new Error("Vertex Gemini story request failed (429): Resource exhausted.");
+      }
+    });
+  }catch(error){terminalError=error instanceof Error?error.message:String(error)}
+  assert.deepEqual(retryDelays,[6000,12000,24000]);
+  assert.deepEqual(attempted,[
+    "google/gemini-3.1-pro-preview",
+    "google/gemini-3.1-pro-preview",
+    "google/gemini-3.1-pro-preview",
+    "google/gemini-3.1-pro-preview"
+  ]);
+  assert.match(terminalError,/429/);
 
   const recoveredAttempts=[];
   const recovered=await withStoryModelFallback({
@@ -150,7 +154,21 @@ try{
   assert.deepEqual(recoveredAttempts,["google/gemini-3.1-pro-preview","google/gemini-3.1-pro-preview"]);
   assert.equal(recovered.data,"recovered-on-gemini");
   assert.equal(recovered.fallbackUsed,false);
-  if(oldKey===undefined)delete process.env.XKIRO_API_KEY;else process.env.XKIRO_API_KEY=oldKey;
+
+  const timeoutAttempts=[];
+  let timeoutError="";
+  try{
+    await withStoryModelFallback({
+      model:"google/gemini-3.1-pro-preview",
+      sleep:async()=>{},
+      run:async(model)=>{
+        timeoutAttempts.push(model);
+        throw new Error("Vertex Gemini story analysis timed out after 120 seconds.");
+      }
+    });
+  }catch(error){timeoutError=error instanceof Error?error.message:String(error)}
+  assert.deepEqual(timeoutAttempts,["google/gemini-3.1-pro-preview","google/gemini-3.1-pro-preview"]);
+  assert.match(timeoutError,/timed out/);
 
   const typeSource=fs.readFileSync(path.join(root,"lib/manga-production/types.ts"),"utf8");
   const presetSource=fs.readFileSync(path.join(root,"lib/manga-production/presets.ts"),"utf8");
