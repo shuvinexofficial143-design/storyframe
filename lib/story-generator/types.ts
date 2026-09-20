@@ -26,6 +26,11 @@ export type GeneratedStoryChapter={
   nextHook:string;
   continuityMemory:string;
   explainer:string;
+  ttsStatus?:"idle"|"generating"|"complete"|"error";
+  ttsVoice?:string;
+  ttsMediaId?:string;
+  ttsAudioUrl?:string;
+  ttsError?:string;
   wordCount:number;
   storyComplete:boolean;
   mangaStatus:"not-started"|"queued"|"building"|"complete"|"error";
@@ -45,6 +50,11 @@ export type StoryGeneratorState={
   analysisModel:StoryAnalysisModel;
   autoContinue:boolean;
   autoGenerateManga:boolean;
+  autoGenerateTts?:boolean;
+  ttsVoice?:string;
+  ttsStylePrompt?:string;
+  combinedAudioMediaId?:string;
+  combinedAudioUrl?:string;
   overview?:StoryOverview;
   chapters:GeneratedStoryChapter[];
   mangaProjectId?:string;

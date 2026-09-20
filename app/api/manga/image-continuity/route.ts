@@ -1,6 +1,7 @@
 import {NextResponse} from "next/server";
 import {z} from "zod";
 import {generateImageWithFallback} from "@/lib/image-providers";
+import {persistGeneratedImage} from "@/lib/media-store";
 
 const Input=z.object({
   prompt:z.string().min(10).max(24000),
@@ -19,10 +20,12 @@ export async function POST(request:Request){
 
     const {prompt,seed,width,height,negativePrompt,referenceImages}=parsed.data;
     const result=await generateImageWithFallback({prompt,seed,width,height,negativePrompt,referenceImages});
+    const media=await persistGeneratedImage({imageDataUrl:result.imageDataUrl,filename:`continuity-${seed}.webp`,metadata:{type:"continuity-image",seed,model:result.model,provider:result.provider}});
 
     return NextResponse.json({
-      imageDataUrl:result.imageDataUrl,
-      sourceUrl:result.sourceUrl||result.imageDataUrl,
+      imageDataUrl:media.imageUrl,
+      sourceUrl:media.imageUrl,
+      mediaId:media.id,
       model:result.model,
       provider:result.provider,
       seed:result.seed,

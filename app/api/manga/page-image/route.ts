@@ -1,6 +1,7 @@
 import {NextResponse} from "next/server";
 import {z} from "zod";
 import {generateImageWithFallback,isRetryableImageProviderFailure} from "@/lib/image-providers";
+import {persistGeneratedImage} from "@/lib/media-store";
 
 const Input=z.object({
   prompt:z.string().min(40).max(40000),
@@ -23,10 +24,12 @@ export async function POST(request:Request){
     // Manga pages are continuity-critical. Do not silently switch image models
     // on a temporary Gemini quota spike; let the browser queue pause and retry.
     const result=await generateImageWithFallback({prompt,seed,width,height,negativePrompt,referenceImages,model,allowFallback:false});
+    const media=await persistGeneratedImage({imageDataUrl:result.imageDataUrl,filename:`manga-page-${seed}.webp`,metadata:{type:"manga-page",seed,model:result.model,provider:result.provider}});
 
     return NextResponse.json({
-      imageDataUrl:result.imageDataUrl,
-      sourceUrl:result.sourceUrl||result.imageDataUrl,
+      imageDataUrl:media.imageUrl,
+      sourceUrl:media.imageUrl,
+      mediaId:media.id,
       model:result.model,
       provider:result.provider,
       seed:result.seed,

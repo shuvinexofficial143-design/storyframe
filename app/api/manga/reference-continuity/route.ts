@@ -1,6 +1,7 @@
 import {NextResponse} from "next/server";
 import {z} from "zod";
 import {generateImageWithFallback,isRetryableImageProviderFailure} from "@/lib/image-providers";
+import {persistGeneratedImage} from "@/lib/media-store";
 
 const Input=z.object({
   name:z.string().min(1).max(120),
@@ -33,8 +34,9 @@ export async function POST(request:Request){
     ].join(" ");
     const sheet=view==="sheet";
     const result=await generateImageWithFallback({prompt,seed,width:sheet?896:512,height:sheet?1024:512,referenceImages:[],allowFallback:false});
+    const media=await persistGeneratedImage({imageDataUrl:result.imageDataUrl,filename:`reference-${name.replace(/[^a-zA-Z0-9_-]+/g,"-")}-${view}-${seed}.webp`,metadata:{type:"character-reference",name,view,seed,model:result.model,provider:result.provider}});
 
-    return NextResponse.json({imageDataUrl:result.imageDataUrl,sourceUrl:result.sourceUrl||result.imageDataUrl,model:result.model,provider:result.provider,seed:result.seed,view,capabilities:result.capabilities,fallbackUsed:result.fallbackUsed||false,primaryError:result.primaryError,warning:result.warning});
+    return NextResponse.json({imageDataUrl:media.imageUrl,sourceUrl:media.imageUrl,mediaId:media.id,model:result.model,provider:result.provider,seed:result.seed,view,capabilities:result.capabilities,fallbackUsed:result.fallbackUsed||false,primaryError:result.primaryError,warning:result.warning});
   }catch(error){
     console.error("Continuity character reference generation failed",error);
     const message=error instanceof Error?error.message:"Character reference generation failed";

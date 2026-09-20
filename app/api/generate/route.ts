@@ -3,6 +3,7 @@ import {z} from "zod";
 import type {Character,Location,Scene} from "@/lib/types";
 import {buildScenePrompt,hashString,aspectRatioToSize} from "@/lib/pollinations";
 import {generateImageWithFallback} from "@/lib/image-providers";
+import {persistGeneratedImage} from "@/lib/media-store";
 
 const CharacterInput=z.object({id:z.string(),name:z.string(),role:z.string(),appearance:z.string(),outfit:z.string(),locked:z.boolean(),referencePrompt:z.string().optional(),consistencyNotes:z.string().optional(),referenceImage:z.string().optional(),referenceImageSourceUrl:z.string().optional(),referenceSeed:z.number().optional()});
 const LocationInput=z.object({id:z.string(),name:z.string(),architecture:z.string(),lighting:z.string(),continuity:z.string(),locked:z.boolean()});
@@ -27,10 +28,12 @@ export async function POST(req:Request){
       .map((character)=>(character.referenceImageSourceUrl||character.referenceImage) as string);
     const {width,height}=aspectRatioToSize(aspectRatio);
     const result=await generateImageWithFallback({prompt:finalPrompt,seed,width,height,negativePrompt:scene.negativePrompt,referenceImages});
+    const media=await persistGeneratedImage({imageDataUrl:result.imageDataUrl,filename:`scene-${scene.sceneNumber}-${seed}.webp`,metadata:{type:"scene-image",sceneId:scene.id,sceneNumber:scene.sceneNumber,seed,model:result.model,provider:result.provider}});
 
     return NextResponse.json({
-      image:result.imageDataUrl,
-      sourceUrl:result.sourceUrl||result.imageDataUrl,
+      image:media.imageUrl,
+      sourceUrl:media.imageUrl,
+      mediaId:media.id,
       provider:result.provider,
       seed:result.seed,
       prompt:finalPrompt,

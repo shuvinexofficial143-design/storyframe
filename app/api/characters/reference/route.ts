@@ -3,6 +3,7 @@ import {z} from "zod";
 import type {Character} from "@/lib/types";
 import {hashString} from "@/lib/pollinations";
 import {generateImageWithFallback} from "@/lib/image-providers";
+import {persistGeneratedImage} from "@/lib/media-store";
 
 const CharacterInput=z.object({id:z.string(),name:z.string(),role:z.string(),appearance:z.string(),outfit:z.string(),locked:z.boolean(),referencePrompt:z.string().optional(),consistencyNotes:z.string().optional(),referenceImage:z.string().optional(),referenceImageSourceUrl:z.string().optional(),referenceSeed:z.number().optional()});
 const Input=z.object({character:CharacterInput,visualStyle:z.string().default("Cinematic Film (Ultra-Photorealistic)")});
@@ -30,9 +31,11 @@ export async function POST(req:Request){
     const seed=character.referenceSeed||hashString(character.name+character.appearance+character.outfit);
     const prompt=buildReferencePrompt(character as Character,visualStyle,seed);
     const result=await generateImageWithFallback({prompt,seed,width:448,height:448,referenceImages:[]});
+    const media=await persistGeneratedImage({imageDataUrl:result.imageDataUrl,filename:`character-${character.name.replace(/[^a-zA-Z0-9_-]+/g,"-")}-${seed}.webp`,metadata:{type:"character-reference",characterId:character.id,characterName:character.name,seed,model:result.model,provider:result.provider}});
     return NextResponse.json({
-      image:result.imageDataUrl,
-      sourceUrl:result.sourceUrl||result.imageDataUrl,
+      image:media.imageUrl,
+      sourceUrl:media.imageUrl,
+      mediaId:media.id,
       provider:result.provider,
       seed:result.seed,
       prompt,
