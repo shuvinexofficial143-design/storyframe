@@ -35,7 +35,7 @@ export async function googleAccessToken(){
   const unsigned=`${header}.${payload}`;
   const signer=createSign("RSA-SHA256");signer.update(unsigned);signer.end();
   const assertion=`${unsigned}.${base64url(signer.sign(account.private_key))}`;
-  const response=await fetch(account.token_uri||TOKEN_URL,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({grant_type:"urn:ietf:params:oauth2:grant-type:jwt-bearer",assertion}),cache:"no-store"});
+  const response=await fetch(account.token_uri||TOKEN_URL,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({grant_type:"urn:ietf:params:oauth:grant-type:jwt-bearer",assertion}),cache:"no-store"});
   const data=await response.json().catch(()=>null) as {access_token?:string;expires_in?:number;error_description?:string}|null;
   if(!response.ok||!data?.access_token)throw new Error(`Google authentication failed (${response.status})${data?.error_description?`: ${data.error_description}`:""}`);
   cache={token:data.access_token,expiresAt:now+(data.expires_in||3600)};
