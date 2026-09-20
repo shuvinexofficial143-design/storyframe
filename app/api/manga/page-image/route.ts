@@ -23,7 +23,7 @@ export async function POST(request:Request){
     const height=1800;
     // Manga pages are continuity-critical. Do not silently switch image models
     // on a temporary Gemini quota spike; let the browser queue pause and retry.
-    const result=await generateImageWithFallback({prompt,seed,width,height,negativePrompt,referenceImages,model,allowFallback:false});
+    const result=await generateImageWithFallback({prompt,seed,width,height,negativePrompt,referenceImages,model,allowFallback:false,retryProvider:false});
     const media=await persistGeneratedImage({imageDataUrl:result.imageDataUrl,filename:`manga-page-${seed}.webp`,metadata:{type:"manga-page",seed,model:result.model,provider:result.provider}});
 
     return NextResponse.json({

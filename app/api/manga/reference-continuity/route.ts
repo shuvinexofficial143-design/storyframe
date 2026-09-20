@@ -33,7 +33,7 @@ export async function POST(request:Request){
       "This is a master StoryFrame identity asset, not a story scene. Make the face distinctive and repeatable. Preserve exact facial structure, eye color, hairstyle, apparent age, body proportions, costume silhouette, colors and signature accessories. No dialogue, captions, labels, watermark, logo or UI."
     ].join(" ");
     const sheet=view==="sheet";
-    const result=await generateImageWithFallback({prompt,seed,width:sheet?896:512,height:sheet?1024:512,referenceImages:[],allowFallback:false});
+    const result=await generateImageWithFallback({prompt,seed,width:sheet?896:512,height:sheet?1024:512,referenceImages:[],allowFallback:false,retryProvider:false});
     const media=await persistGeneratedImage({imageDataUrl:result.imageDataUrl,filename:`reference-${name.replace(/[^a-zA-Z0-9_-]+/g,"-")}-${view}-${seed}.webp`,metadata:{type:"character-reference",name,view,seed,model:result.model,provider:result.provider}});
 
     return NextResponse.json({imageDataUrl:media.imageUrl,sourceUrl:media.imageUrl,mediaId:media.id,model:result.model,provider:result.provider,seed:result.seed,view,capabilities:result.capabilities,fallbackUsed:result.fallbackUsed||false,primaryError:result.primaryError,warning:result.warning});

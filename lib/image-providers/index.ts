@@ -138,6 +138,7 @@ export function isRetryableImageProviderFailure(error:unknown){
 }
 
 async function executePreferredWithRetry(provider:ImageProvider,input:ImageGenerationInput){
+  if(input.retryProvider===false)return executeProvider(provider,input);
   try{
     return await executeProvider(provider,input);
   }catch(firstError){

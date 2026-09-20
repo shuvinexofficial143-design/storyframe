@@ -18,6 +18,7 @@ export type ImageGenerationInput={
   negativePrompt?:string;
   referenceImages?:string[];
   allowFallback?:boolean;
+  retryProvider?:boolean;
 };
 
 export type ImageProviderRequest={

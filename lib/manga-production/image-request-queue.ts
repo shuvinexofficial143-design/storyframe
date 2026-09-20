@@ -1,5 +1,5 @@
-export const DEFAULT_IMAGE_REQUEST_INTERVAL_MS=4_000;
-export const IMAGE_QUOTA_BACKOFF_MS=[2_000,4_000,8_000,16_000,32_000] as const;
+export const DEFAULT_IMAGE_REQUEST_INTERVAL_MS=10_000;
+export const IMAGE_QUOTA_BACKOFF_MS=[10_000,20_000,40_000,60_000,90_000] as const;
 
 let lastImageRequestStartedAt=0;
 let queueTail:Promise<void>=Promise.resolve();

@@ -521,24 +521,10 @@ export function MangaPageProductionStudio(){
       for(const plannedPage of orderedPages){
         const existing=locatePage(plannedPage.id);
         if(existing?.page.composedImageDataUrl)continue;
-        let pageFinished=false;
-        let lastError="Page generation failed";
-        for(let attempt=1;attempt<=3&&!pageFinished;attempt+=1){
-          setProgress(`Strict sequential render ${completed+1}/${initialPending}: Page ${plannedPage.pageNumber} · attempt ${attempt}/3. The next page will not start until this page is complete.`);
-          try{
-            await renderPage(plannedPage.id,false,controller.signal);
-            const verified=locatePage(plannedPage.id);
-            if(!verified?.page.composedImageDataUrl||verified.page.status!=="composed")throw new Error(`Page ${plannedPage.pageNumber} was not fully composed.`);
-            pageFinished=true;
-          }catch(reason){
-            lastError=reason instanceof Error?reason.message:"Page generation failed";
-            if(attempt<3){
-              setProgress(`Page ${plannedPage.pageNumber} did not finish. Retrying the SAME page before continuing…`);
-              await waitCancelable(attempt*3000,controller.signal);
-            }
-          }
-        }
-        if(!pageFinished)throw new Error(`Page ${plannedPage.pageNumber} could not finish after 3 attempts. Queue stopped here and later pages were NOT started. ${lastError}`);
+        setProgress(`Strict sequential render ${completed+1}/${initialPending}: Page ${plannedPage.pageNumber}. Gemini quota recovery is handled by the image queue before this page can fail.`);
+        await renderPage(plannedPage.id,false,controller.signal);
+        const verified=locatePage(plannedPage.id);
+        if(!verified?.page.composedImageDataUrl||verified.page.status!=="composed")throw new Error(`Page ${plannedPage.pageNumber} was not fully composed.`);
         completed+=1;
       }
       setNotice(`${completed} remaining manga pages generated in strict order. No later page starts until the current page is fully saved and composed.`);
