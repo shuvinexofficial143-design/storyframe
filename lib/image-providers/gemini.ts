@@ -38,7 +38,7 @@ function base64url(value:string|Buffer){const bytes=Buffer.isBuffer(value)?value
 async function serviceAccountAccessToken(account:ServiceAccount){
   const now=Math.floor(Date.now()/1000);if(tokenCache&&tokenCache.expiresAt>now+90)return tokenCache.accessToken;
   const header=base64url(JSON.stringify({alg:"RS256",typ:"JWT"}));const payload=base64url(JSON.stringify({iss:account.client_email,scope:GOOGLE_SCOPE,aud:account.token_uri||GOOGLE_TOKEN_URL,iat:now,exp:now+3600}));const unsigned=`${header}.${payload}`;const signer=createSign("RSA-SHA256");signer.update(unsigned);signer.end();const signature=base64url(signer.sign(account.private_key));const assertion=`${unsigned}.${signature}`;
-  const response=await fetch(account.token_uri||GOOGLE_TOKEN_URL,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({grant_type:"urn:ietf:params:oauth2:grant-type:jwt-bearer",assertion}),cache:"no-store"});
+  const response=await fetch(account.token_uri||GOOGLE_TOKEN_URL,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({grant_type:"urn:ietf:params:oauth:grant-type:jwt-bearer",assertion}),cache:"no-store"});
   const payloadJson=await response.json().catch(()=>null) as {access_token?:string;expires_in?:number;error_description?:string}|null;
   if(!response.ok||!payloadJson?.access_token)throw new Error(`Vertex AI service-account authentication failed (${response.status})${payloadJson?.error_description?`: ${payloadJson.error_description}`:""}`);
   tokenCache={accessToken:payloadJson.access_token,expiresAt:now+(payloadJson.expires_in||3600)};return payloadJson.access_token;

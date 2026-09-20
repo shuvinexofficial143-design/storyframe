@@ -78,7 +78,7 @@ export function requestQueuedMangaImage<T>(input:{
       if(!retryable||attempt>=IMAGE_QUOTA_BACKOFF_MS.length)throw new Error(lastError);
 
       const waitMs=retryDelay(payload,attempt);
-      input.onStatus?.(`${input.label}: Gemini is rate-limited/temporarily busy. Pausing ${Math.ceil(waitMs/1000)}s, then continuing automatically…`);
+      const reason=lastError.replace(/\s+/g," ").slice(0,220);\n      input.onStatus?.(`${input.label}: request temporarily rejected. ${reason} Waiting ${Math.ceil(waitMs/1000)}s before retry…`);
       await sleep(waitMs,input.signal);
     }
 
