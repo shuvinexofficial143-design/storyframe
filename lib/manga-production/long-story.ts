@@ -63,7 +63,12 @@ function splitLongStory(story:string,maxChars=12000){
 
 export function shouldUseLongStoryAnalysis(story:string){
   const words=story.trim().split(/\s+/).filter(Boolean).length;
-  return story.length>30000||words>5500;
+  // Manga master analysis is the heaviest structured Gemini request. A single
+  // 2k+ word chapter can spend the full 120s request window while trying to
+  // emit every fine-grained beat at once. Route medium/long chapters through
+  // the existing sequential chunk analyzer instead: one compact global pass,
+  // then smaller ordered beat chunks that preserve continuity.
+  return story.length>9000||words>1800;
 }
 
 export async function analyzeLongMangaMaster(input:MangaMasterInput):Promise<MangaMasterAnalysis>{
