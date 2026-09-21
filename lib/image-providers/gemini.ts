@@ -1,4 +1,3 @@
-import {createSign} from "node:crypto";
 import sharp from "sharp";
 import type {ImageGenerationInput,ImageProvider} from "./types";
 
@@ -20,30 +19,11 @@ const ASPECTS=[
   {id:"21:9",value:21/9}
 ] as const;
 
-type ServiceAccount={project_id?:string;client_email:string;private_key:string;token_uri?:string};
-let tokenCache:{accessToken:string;expiresAt:number}|null=null;
-
 function nearestAspect(width:number,height:number){const ratio=width/height;return ASPECTS.reduce((best,item)=>Math.abs(item.value-ratio)<Math.abs(best.value-ratio)?item:best).id}
 
-function parseServiceAccount():ServiceAccount|null{
-  const direct=process.env.VERTEX_AI_SERVICE_ACCOUNT_JSON?.trim();const encoded=process.env.VERTEX_AI_SERVICE_ACCOUNT_BASE64?.trim();const raw=direct||(encoded?Buffer.from(encoded,"base64").toString("utf8"):"");if(!raw)return null;
-  try{const parsed=JSON.parse(raw) as Partial<ServiceAccount>;if(!parsed.client_email||!parsed.private_key)return null;return parsed as ServiceAccount}catch{return null}
-}
-
-function projectId(){return process.env.VERTEX_AI_PROJECT_ID?.trim()||process.env.GOOGLE_CLOUD_PROJECT_ID?.trim()||process.env.GOOGLE_CLOUD_PROJECT?.trim()||parseServiceAccount()?.project_id?.trim()||""}
-function apiKey(){return process.env.VERTEX_AI_API_KEY?.trim()||process.env.GOOGLE_CLOUD_API_KEY?.trim()||process.env.GEMINI_API_KEY?.trim()||""}
+function projectId(){return process.env.VERTEX_AI_PROJECT_ID?.trim()||process.env.GOOGLE_CLOUD_PROJECT_ID?.trim()||process.env.GOOGLE_CLOUD_PROJECT?.trim()||""}
+function apiKey(){return process.env.GEMINI_API_KEY?.trim()||process.env.GOOGLE_API_KEY?.trim()||process.env.VERTEX_AI_API_KEY?.trim()||process.env.GOOGLE_CLOUD_API_KEY?.trim()||""}
 function location(){return process.env.VERTEX_AI_LOCATION?.trim()||process.env.GOOGLE_CLOUD_LOCATION?.trim()||"global"}
-function base64url(value:string|Buffer){const bytes=Buffer.isBuffer(value)?value:Buffer.from(value,"utf8");return bytes.toString("base64").replace(/=/g,"").replace(/\+/g,"-").replace(/\//g,"_")}
-
-async function serviceAccountAccessToken(account:ServiceAccount){
-  const now=Math.floor(Date.now()/1000);if(tokenCache&&tokenCache.expiresAt>now+90)return tokenCache.accessToken;
-  const header=base64url(JSON.stringify({alg:"RS256",typ:"JWT"}));const payload=base64url(JSON.stringify({iss:account.client_email,scope:GOOGLE_SCOPE,aud:account.token_uri||GOOGLE_TOKEN_URL,iat:now,exp:now+3600}));const unsigned=`${header}.${payload}`;const signer=createSign("RSA-SHA256");signer.update(unsigned);signer.end();const signature=base64url(signer.sign(account.private_key));const assertion=`${unsigned}.${signature}`;
-  const response=await fetch(account.token_uri||GOOGLE_TOKEN_URL,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({grant_type:"urn:ietf:params:oauth:grant-type:jwt-bearer",assertion}),cache:"no-store"});
-  const payloadJson=await response.json().catch(()=>null) as {access_token?:string;expires_in?:number;error_description?:string}|null;
-  if(!response.ok||!payloadJson?.access_token)throw new Error(`Vertex AI service-account authentication failed (${response.status})${payloadJson?.error_description?`: ${payloadJson.error_description}`:""}`);
-  tokenCache={accessToken:payloadJson.access_token,expiresAt:now+(payloadJson.expires_in||3600)};return payloadJson.access_token;
-}
-
 function parseDataUrl(value:string){const match=value.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,([\s\S]+)$/);if(!match)return null;return {mimeType:match[1],bytes:Buffer.from(match[2],"base64")}}
 async function loadReference(value:string,index:number){
   const inline=parseDataUrl(value);let bytes:Buffer;
@@ -60,16 +40,16 @@ export const geminiImageProvider:ImageProvider={
   defaultModel:process.env.GEMINI_IMAGE_MODEL?.trim()||DEFAULT_MODEL,
   capabilities:{textToImage:true,imageReference:true,imageToImage:true,characterReference:true,negativePrompt:false,deterministicSeed:false},
   responseKind:"gemini-json",
-  isConfigured(){return Boolean(projectId()&&(parseServiceAccount()||apiKey()))},
+  isConfigured(){return Boolean(projectId()&&apiKey())},
   async buildRequest(input:ImageGenerationInput){
-    const project=projectId();const account=parseServiceAccount();const key=apiKey();
+    const project=projectId();const key=apiKey();
     if(!project)throw new Error("Vertex AI image generation is not configured. Add VERTEX_AI_PROJECT_ID (the Google Cloud project ID, not only the display name) in Vercel Environment Variables.");
-    if(!account&&!key)throw new Error("Vertex AI image generation is not configured. Add VERTEX_AI_SERVICE_ACCOUNT_JSON (recommended) or VERTEX_AI_API_KEY (a Google Cloud authorization key permitted for Vertex AI) in Vercel Environment Variables.");
+    if(!key)throw new Error("Vertex AI image generation is not configured. Add GEMINI_API_KEY or GOOGLE_API_KEY in Vercel Environment Variables.");
     const model=input.model||geminiImageProvider.defaultModel;const references=(input.referenceImages||[]).filter(Boolean).slice(0,4);const referenceInputs=await Promise.all(references.map((value,index)=>loadReference(value,index)));const avoidance=input.negativePrompt?.trim()?`AVOID / NEGATIVE CONTINUITY: ${input.negativePrompt.trim()}`:"";const seedAnchor=`StoryFrame continuity anchor: ${input.seed}. Gemini does not expose a deterministic image seed parameter, so use this number only as a stable creative continuity cue and never render it as text.`;
     const referenceInstruction=references.length?"REFERENCE PRIORITY: preserve the exact identity and visual facts from the supplied reference images. StoryFrame orders recurring character references first, environment/location references second, and the immediately previous generated frame last. Keep the same face, hairstyle, apparent age, body proportions, costume design and colors, recurring architecture, props and visual world. Change only the action, pose, camera, lighting, emotion or story-authorized state required by the current request.":"";
     const providerInstruction="Generate exactly ONE image that follows the supplied visual style, subject, continuity and composition. It may be a manga panel, cinematic frame, character reference or other StoryFrame asset; do not override the requested style. Return image and text modalities as required by Vertex Gemini image models. No captions, speech bubbles, watermark text, logo or UI unless the supplied request explicitly requires a non-image overlay (StoryFrame normally adds text itself).";
     const prompt=[input.prompt,referenceInstruction,avoidance,seedAnchor,providerInstruction].filter(Boolean).join("\n\n");
-    const url=new URL(endpoint(model));const headers:Record<string,string>={"Content-Type":"application/json; charset=utf-8"};if(account)headers.Authorization=`Bearer ${await serviceAccountAccessToken(account)}`;else url.searchParams.set("key",key);
+    const url=new URL(endpoint(model));const headers:Record<string,string>={"Content-Type":"application/json; charset=utf-8"};url.searchParams.set("key",key);
     return {url:url.toString(),method:"POST" as const,headers,body:JSON.stringify({contents:[{role:"user",parts:[{text:prompt},...referenceInputs]}],generationConfig:{responseModalities:["TEXT","IMAGE"],imageConfig:{aspectRatio:nearestAspect(input.width,input.height),imageSize:"1K"}}})};
   }
 };
