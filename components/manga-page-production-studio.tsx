@@ -1,12 +1,12 @@
 "use client";
 
 import {useEffect,useMemo,useRef,useState} from "react";
-import {BookOpen,Download,ImageIcon,Loader2,MapPinned,Plus,Sparkles,Users} from "lucide-react";
+import {BookOpen,Download,Film,ImageIcon,Loader2,MapPinned,Mic2,Plus,Sparkles,Users} from "lucide-react";
 import {parseJsonResponse} from "@/lib/fetch-json";
 import {deriveSeed} from "@/lib/continuity/seed";
 import {createChapter,createProject,normalizeName} from "@/lib/continuity/project-defaults";
 import {loadStudioState,saveStudioState} from "@/lib/continuity/storage";
-import type {CharacterReference,MangaChapter,MangaProject,MangaStudioState} from "@/lib/continuity/project-types";
+import type {CharacterReference,MangaChapter,MangaProject,MangaStudioState,NarrationSegment} from "@/lib/continuity/project-types";
 import {composeGeneratedMangaPage} from "@/lib/manga-production/full-page-composer";
 import {compileMangaPagePrompt} from "@/lib/manga-production/page-prompt-compiler";
 import {mergeMangaMasterIntoProject} from "@/lib/manga-production/project-bridge";
@@ -16,7 +16,7 @@ import {MANGA_STYLE_PRESETS,type MangaChapterProduction,type MangaMasterAnalysis
 import {downloadDataUrl} from "@/lib/manga-production/composer";
 import {continuationContextText,getInheritedMangaStyle,getPreviousChapterContinuity,getPreviousRenderedMangaPage} from "@/lib/manga-production/chapter-continuity";
 import {requestQueuedMangaImage} from "@/lib/manga-production/image-request-queue";
-import {StoryGeneratorWorkspace,type StoryGeneratorView} from "./story-generator-workspace";
+import {DEFAULT_TTS_STYLE,DEFAULT_TTS_VOICE,STORYFRAME_TTS_VOICES} from "@/lib/tts-voices";
 
 const now=()=>new Date().toISOString();
 const wait=(ms:number)=>new Promise<void>((resolve)=>setTimeout(resolve,ms));
@@ -31,7 +31,7 @@ type ImageResponse={imageDataUrl:string;sourceUrl?:string;model:string;provider:
 type ReferenceResponse={imageDataUrl:string;sourceUrl:string;model:string;provider:string;seed:number;warning?:string};
 type MasterResponse={kind:"master";data:MangaMasterAnalysis};
 type PagesResponse={kind:"pages";data:MangaPagePlan};
-type Tab="generator"|"generated-chapters"|"chapter-explainer"|"story"|"characters"|"locations"|"script"|"pages"|"export"|"download";
+type Tab="story"|"characters"|"locations"|"script"|"pages"|"narration"|"export"|"download";
 type ReferenceView="primary"|"full-body"|"three-quarter"|"side"|"sheet";
 type StoryGeneratorCommand={
   requestId:string;
@@ -54,12 +54,15 @@ export function MangaPageProductionStudio(){
   const [state,setState]=useState<MangaStudioState>(()=>{const p=createProject("My Manga Project");return {activeProjectId:p.id,projects:[p]}});
   const stateRef=useRef(state);
   const [hydrated,setHydrated]=useState(false);
-  const [tab,setTab]=useState<Tab>("generator");
+  const [tab,setTab]=useState<Tab>("story");
   const [busy,setBusy]=useState("");
   const [progress,setProgress]=useState("");
   const [notice,setNotice]=useState("");
   const [error,setError]=useState("");
   const [pacingPreset,setPacingPreset]=useState<MangaPacingPreset>("Balanced");
+  const [narrationVoice,setNarrationVoice]=useState(DEFAULT_TTS_VOICE);
+  const [narrationStyle,setNarrationStyle]=useState("Warm cinematic Hindi storyteller. Sound conversational and engaging, not like a document reader. Use natural pauses, curiosity, tension and emotional emphasis. Keep pronunciation clear and human.");
+  const [videoUrl,setVideoUrl]=useState("");
   const busyRef=useRef(busy);
   // eslint-disable-next-line react-hooks/refs -- imperative browser-event bridge reads the latest busy state without re-subscribing.
   busyRef.current=busy;
@@ -700,12 +703,191 @@ export function MangaPageProductionStudio(){
     }
   };
 
+  const audioDurationMs=(src:string)=>new Promise<number>((resolve,reject)=>{
+    const audio=new Audio();
+    audio.preload="metadata";
+    audio.onloadedmetadata=()=>resolve(Number.isFinite(audio.duration)?Math.max(1,Math.round(audio.duration*1000)):0);
+    audio.onerror=()=>reject(new Error("Generated narration audio could not be decoded."));
+    audio.src=src;
+  });
+
+  const generateNarrationPlan=async()=>{
+    if(!production?.pages.length){setError("पहले story को analyze करके visual pages plan करो।");return}
+    setBusy("narration-plan");setError("");setNotice("");setVideoUrl("");
+    try{
+      const response=await fetch("/api/narration/plan",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          title:chapter.title,
+          story:chapter.story,
+          analysisModel:project.analysisModel,
+          pages:production.pages.map((page)=>({
+            id:page.id,
+            pageNumber:page.pageNumber,
+            pagePurpose:page.pagePurpose,
+            beats:page.panels.map((panel)=>({storyBeat:panel.storyBeat,sourceText:panel.sourceText}))
+          }))
+        })
+      });
+      const data=await parseJsonResponse<{kind:"narration-plan";data:{explainer:string;segments:Array<{pageId:string;pageNumber:number;text:string}>}}>(response);
+      const segments:NarrationSegment[]=data.data.segments.map((segment,index)=>({
+        id:`narration-${chapter.id}-${index+1}`,
+        pageId:segment.pageId,
+        pageNumber:segment.pageNumber,
+        text:segment.text,
+        status:"idle"
+      }));
+      updateChapter((item)=>({...item,narration:{
+        explainer:data.data.explainer,
+        voice:narrationVoice,
+        stylePrompt:narrationStyle,
+        segments,
+        updatedAt:now()
+      },updatedAt:now()}));
+      setNotice(`Explainer ready and aligned to ${segments.length} generated visual pages. Audio is still completely separate from image/story generation.`);
+    }catch(reason){
+      setError(reason instanceof Error?reason.message:"Explainer narration planning failed.");
+    }finally{
+      setBusy("");setProgress("");
+    }
+  };
+
+  const generateNarrationAudio=async()=>{
+    const current=stateRef.current.projects.find((item)=>item.id===project.id)?.chapters.find((item)=>item.id===chapter.id);
+    const narration=current?.narration;
+    if(!narration?.segments.length){setError("पहले Narration & Video में explainer sync plan generate करो।");return}
+    setBusy("narration-audio");setError("");setNotice("");setVideoUrl("");
+    try{
+      for(let index=0;index<narration.segments.length;index+=1){
+        const latest=stateRef.current.projects.find((item)=>item.id===project.id)?.chapters.find((item)=>item.id===chapter.id)?.narration;
+        const segment=latest?.segments[index];
+        if(!segment)continue;
+        setProgress(`Generating isolated TTS audio ${index+1}/${narration.segments.length} · Visual Page ${segment.pageNumber}…`);
+        updateChapter((item)=>({...item,narration:item.narration?{...item.narration,voice:narrationVoice,stylePrompt:narrationStyle,segments:item.narration.segments.map((entry)=>entry.id===segment.id?{...entry,status:"generating",error:undefined}:entry),updatedAt:now()}:item.narration,updatedAt:now()}));
+        const response=await fetch("/api/narration/tts",{
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({text:segment.text,voice:narrationVoice,stylePrompt:narrationStyle})
+        });
+        const data=await parseJsonResponse<{kind:"narration-audio";audioDataUrl:string}>(response);
+        const durationMs=await audioDurationMs(data.audioDataUrl);
+        updateChapter((item)=>({...item,narration:item.narration?{...item.narration,voice:narrationVoice,stylePrompt:narrationStyle,segments:item.narration.segments.map((entry)=>entry.id===segment.id?{...entry,audioDataUrl:data.audioDataUrl,durationMs,status:"complete",error:undefined}:entry),updatedAt:now()}:item.narration,updatedAt:now()}));
+      }
+      setNotice("Narration audio complete. Every audio segment is locked to its matching visual page.");
+    }catch(reason){
+      setError(reason instanceof Error?reason.message:"Narration audio generation failed.");
+    }finally{
+      setBusy("");setProgress("");
+    }
+  };
+
+  const loadVideoImage=async(src:string)=>{
+    const response=await fetch(src);
+    if(!response.ok)throw new Error("A generated visual could not be loaded for video export.");
+    const blob=await response.blob();
+    const url=URL.createObjectURL(blob);
+    const image=new Image();
+    await new Promise<void>((resolve,reject)=>{image.onload=()=>resolve();image.onerror=()=>reject(new Error("A video frame could not be decoded."));image.src=url});
+    return {image,url};
+  };
+
+  const exportNarrationVideo=async()=>{
+    const current=stateRef.current.projects.find((item)=>item.id===project.id)?.chapters.find((item)=>item.id===chapter.id);
+    const narration=current?.narration;
+    const currentProduction=current?.manga;
+    if(!narration?.segments.length||!currentProduction?.pages.length){setError("पहले images और narration तैयार करो।");return}
+    const missingAudio=narration.segments.find((segment)=>!segment.audioDataUrl);
+    if(missingAudio){setError(`Visual Page ${missingAudio.pageNumber} का audio अभी generate नहीं हुआ है।`);return}
+    const ordered=narration.segments.map((segment)=>{
+      const page=currentProduction.pages.find((item)=>item.id===segment.pageId);
+      if(!page?.composedImageDataUrl)throw new Error(`Visual Page ${segment.pageNumber} की generated image अभी तैयार नहीं है।`);
+      return {segment,page};
+    });
+
+    setBusy("video-export");setError("");setNotice("");setProgress("Preparing synchronized video export…");
+    const objectUrls:string[]=[];
+    let audioContext:AudioContext|undefined;
+    try{
+      const canvas=document.createElement("canvas");canvas.width=1280;canvas.height=720;
+      const ctx=canvas.getContext("2d");if(!ctx)throw new Error("Browser video canvas is unavailable.");
+      const loadedImages=[];
+      for(const item of ordered){
+        const loaded=await loadVideoImage(item.page.composedImageDataUrl!);
+        objectUrls.push(loaded.url);loadedImages.push(loaded.image);
+      }
+
+      audioContext=new AudioContext();
+      await audioContext.resume();
+      const buffers=[];
+      for(let index=0;index<ordered.length;index+=1){
+        setProgress(`Decoding narration audio ${index+1}/${ordered.length}…`);
+        const bytes=await (await fetch(ordered[index].segment.audioDataUrl!)).arrayBuffer();
+        buffers.push(await audioContext.decodeAudioData(bytes));
+      }
+
+      const destination=audioContext.createMediaStreamDestination();
+      const videoStream=canvas.captureStream(30);
+      const combined=new MediaStream([...videoStream.getVideoTracks(),...destination.stream.getAudioTracks()]);
+      const mimeType=MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus")?"video/webm;codecs=vp9,opus":"video/webm";
+      const recorder=new MediaRecorder(combined,{mimeType,videoBitsPerSecond:6_000_000});
+      const chunks:Blob[]=[];
+      recorder.ondataavailable=(event)=>{if(event.data.size)chunks.push(event.data)};
+      const stopped=new Promise<void>((resolve)=>{recorder.onstop=()=>resolve()});
+
+      const draw=(image:HTMLImageElement)=>{
+        ctx.fillStyle="#000";ctx.fillRect(0,0,canvas.width,canvas.height);
+        const scale=Math.min(canvas.width/image.naturalWidth,canvas.height/image.naturalHeight);
+        const width=image.naturalWidth*scale,height=image.naturalHeight*scale;
+        ctx.drawImage(image,(canvas.width-width)/2,(canvas.height-height)/2,width,height);
+      };
+      draw(loadedImages[0]);
+
+      recorder.start(1000);
+      const startAt=audioContext.currentTime+.25;
+      let offset=0;
+      const boundaries:number[]=[0];
+      buffers.forEach((buffer)=>{
+        const source=audioContext!.createBufferSource();
+        source.buffer=buffer;source.connect(destination);source.start(startAt+offset);
+        offset+=buffer.duration;boundaries.push(offset);
+      });
+
+      let running=true;
+      const render=()=>{
+        if(!running)return;
+        const elapsed=Math.max(0,audioContext!.currentTime-startAt);
+        let frameIndex=0;
+        while(frameIndex<ordered.length-1&&elapsed>=boundaries[frameIndex+1])frameIndex+=1;
+        draw(loadedImages[frameIndex]);
+        requestAnimationFrame(render);
+      };
+      requestAnimationFrame(render);
+      setProgress(`Recording synchronized video · ${ordered.length} visual segments…`);
+      await new Promise<void>((resolve)=>setTimeout(resolve,(offset+.45)*1000));
+      running=false;recorder.stop();await stopped;
+      combined.getTracks().forEach((track)=>track.stop());
+
+      const blob=new Blob(chunks,{type:mimeType});
+      const url=URL.createObjectURL(blob);
+      if(videoUrl)URL.revokeObjectURL(videoUrl);
+      setVideoUrl(url);
+      setNotice(`Video ready · ${Math.round(offset)}s · images switch exactly at their narration-segment boundaries.`);
+    }catch(reason){
+      setError(reason instanceof Error?reason.message:"Video export failed.");
+    }finally{
+      objectUrls.forEach((url)=>URL.revokeObjectURL(url));
+      if(audioContext)void audioContext.close();
+      setBusy("");setProgress("");
+    }
+  };
+
   const chapterNumber=Math.max(1,project.chapters.findIndex((item)=>item.id===chapter.id)+1);
   const generatedChapterPages=chapter.manga?.pages.filter((page)=>Boolean(page.composedImageDataUrl)).length||0;
   const plannedChapterPages=chapter.manga?.pages.length||0;
   const generatedProjectPages=project.chapters.reduce((sum,item)=>sum+(item.manga?.pages.filter((page)=>Boolean(page.composedImageDataUrl)).length||0),0);
   const plannedProjectPages=project.chapters.reduce((sum,item)=>sum+(item.manga?.pages.length||0),0);
-  const tabs:[Tab,string][]=[["generator","Story Generator"],["generated-chapters","Chapters"],["chapter-explainer","Chapter Explainer"],["story","Story"],["characters","Characters"],["locations","Locations"],["script","Manga Script"],["pages","Manga Pages"],["export","Export"],["download","Download All"]];
+  const tabs:[Tab,string][]=[["story","Story"],["characters","Characters"],["locations","Locations"],["script","Visual Script"],["pages","Images"],["narration","Narration & Video"],["export","Export"],["download","Download All"]];
   const building=busy==="master"||busy==="planning";
 
   return <main className="min-h-screen bg-[#080a0f] text-zinc-100">
@@ -730,22 +912,14 @@ export function MangaPageProductionStudio(){
         <div className="mt-4 flex gap-2 overflow-x-auto">{tabs.map(([id,label])=><button key={id} onClick={()=>setTab(id)} className={`whitespace-nowrap rounded-xl px-4 py-2 text-sm ${tab===id?"bg-violet-500 text-white":"bg-white/5 text-zinc-400"}`}>{label}</button>)}</div>
       </section>
 
-      <div className={tab==="generator"||tab==="generated-chapters"||tab==="chapter-explainer"?"block":"hidden"}>
-        <StoryGeneratorWorkspace
-          view={(tab==="generated-chapters"?"chapters":tab==="chapter-explainer"?"explainer":"generator") as StoryGeneratorView}
-          onOpenMangaStory={()=>setTab("story")}
-          onPipelineStage={(stage)=>setTab(stage==="chapters"?"generated-chapters":stage==="explainer"?"chapter-explainer":"story")}
-        />
-      </div>
-
       {progress&&<div className="flex items-center justify-between gap-3 rounded-2xl border border-violet-500/20 bg-violet-500/8 p-4 text-sm text-violet-200"><div><Loader2 className="mr-2 inline animate-spin" size={15}/>{progress}</div>{busy&&<button onClick={cancelCurrentTask} className="shrink-0 rounded-lg border border-red-300/40 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-200">Cancel</button>}</div>}
       {notice&&<div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/8 p-4 text-sm text-emerald-200">{notice}</div>}
       {error&&<div className="rounded-2xl border border-red-500/20 bg-red-500/8 p-4 text-sm text-red-200">{error}</div>}
 
       {tab==="story"&&<section className="rounded-2xl border border-white/10 bg-[#0d1017] p-5">
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div><h2 className="font-bold">Full Story</h2><p className="text-sm text-zinc-500">AI first analyzes the story and plans every page. New chapters automatically continue the previous chapter&apos;s locked characters, locations, props and ending state.</p></div>
-          <div className="flex gap-2"><button disabled={!!busy} onClick={()=>void buildManga()} className="rounded-xl bg-violet-500 px-4 py-3 text-sm font-bold disabled:opacity-50">{building?<Loader2 className="mr-1 inline animate-spin" size={16}/>:<Sparkles className="mr-1 inline" size={16}/>} {building?"Building Manga…":"Build Manga Script & Pages"}</button>{building&&<button onClick={cancelCurrentTask} className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm font-bold text-red-200">Cancel</button>}</div>
+          <div><h2 className="font-bold">Story Input</h2><p className="text-sm text-zinc-500">यह StoryFrame का एकमात्र story input है। यहीं story paste करो; visual analysis, beats, images, explainer, TTS और video इसी saved story से बनेंगे।</p></div>
+          <div className="flex gap-2"><button disabled={!!busy} onClick={()=>void buildManga()} className="rounded-xl bg-violet-500 px-4 py-3 text-sm font-bold disabled:opacity-50">{building?<Loader2 className="mr-1 inline animate-spin" size={16}/>:<Sparkles className="mr-1 inline" size={16}/>} {building?"Analyzing & Planning…":"Analyze Story & Plan Visuals"}</button>{building&&<button onClick={cancelCurrentTask} className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm font-bold text-red-200">Cancel</button>}</div>
         </div>
         <textarea value={chapter.story} onChange={(e)=>setStory(e.target.value)} className="min-h-[420px] w-full rounded-xl border border-white/10 bg-black/25 p-4 text-sm leading-7 outline-none focus:border-violet-500/50" placeholder="Paste the full story here…"/>
       </section>}
@@ -775,6 +949,41 @@ export function MangaPageProductionStudio(){
             <details className="mt-4 rounded-xl border border-white/8 bg-black/20 p-3"><summary className="cursor-pointer text-sm font-semibold text-zinc-300">View panel plan ({page.panels.length} panels)</summary><div className="mt-3 grid gap-3 md:grid-cols-2">{page.panels.map((panel)=><div key={panel.id} className="rounded-lg border border-white/8 p-3"><div className="text-xs font-bold text-cyan-300">Panel {panel.panelNumber} · {panel.cameraShot}</div><div className="mt-1 text-sm">{panel.storyBeat}</div><div className="mt-1 text-xs text-zinc-500">{panel.action}</div>{panel.dialogue.map((line,index)=><div key={index} className="mt-1 text-xs text-amber-200">{line.speaker||line.bubbleType}: {line.text}</div>)}</div>)}</div></details>
           </article>)}
         </>:<div className="rounded-2xl border border-white/10 bg-[#0d1017] p-8 text-center text-zinc-500">Build Manga Script & Pages first.</div>}
+      </section>}
+
+      {tab==="narration"&&<section className="space-y-5">
+        <div className="rounded-2xl border border-violet-500/20 bg-[#0d1017] p-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div><div className="flex items-center gap-2 text-lg font-bold"><Mic2 size={18} className="text-violet-300"/> Narration & Video</div><p className="mt-1 max-w-3xl text-sm text-zinc-500">यह pipeline image generation और story analysis auth से अलग है। Explainer को visual-page segments में बाँटा जाता है, हर segment का अलग TTS बनता है, फिर उसी exact audio duration पर matching image लगाकर video export होता है।</p></div>
+            <div className="flex flex-wrap gap-2">
+              <button disabled={!!busy||!production?.pages.length} onClick={()=>void generateNarrationPlan()} className="rounded-xl border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-xs font-bold text-violet-100 disabled:opacity-40"><Sparkles className="mr-1 inline" size={13}/> 1. Generate Explainer + Sync Plan</button>
+              <button disabled={!!busy||!chapter.narration?.segments.length} onClick={()=>void generateNarrationAudio()} className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs font-bold text-cyan-100 disabled:opacity-40"><Mic2 className="mr-1 inline" size={13}/> 2. Generate Audio</button>
+              <button disabled={!!busy||!chapter.narration?.segments.every((item)=>item.audioDataUrl)||!production?.pages.every((page)=>page.composedImageDataUrl)} onClick={()=>void exportNarrationVideo()} className="rounded-xl bg-emerald-500 px-3 py-2 text-xs font-black text-black disabled:opacity-40"><Film className="mr-1 inline" size={13}/> 3. Build Video</button>
+            </div>
+          </div>
+          <div className="mt-4 grid gap-3 md:grid-cols-[220px_1fr]">
+            <label className="text-xs font-semibold text-zinc-400">Narrator Voice<select disabled={!!busy} value={narrationVoice} onChange={(e)=>setNarrationVoice(e.target.value)} className="mt-1 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-zinc-100">{STORYFRAME_TTS_VOICES.map((voice)=><option key={voice.id} value={voice.id}>{voice.label}</option>)}</select></label>
+            <label className="text-xs font-semibold text-zinc-400">TTS Performance Prompt<textarea disabled={!!busy} value={narrationStyle} onChange={(e)=>setNarrationStyle(e.target.value)} className="mt-1 min-h-20 w-full rounded-lg border border-white/10 bg-black/30 p-3 text-sm leading-6 text-zinc-100"/></label>
+          </div>
+          <div className="mt-3 rounded-xl border border-cyan-500/15 bg-cyan-500/5 p-3 text-xs text-cyan-100/80">Dedicated TTS env: NARRATION_TTS_PROJECT_ID + NARRATION_TTS_SERVICE_ACCOUNT_JSON. यह image API key और story-analysis credentials को touch नहीं करता।</div>
+        </div>
+
+        {chapter.narration?<div className="rounded-2xl border border-white/10 bg-[#0d1017] p-5">
+          <div className="font-bold">Engaging Explainer Script</div>
+          <div className="mt-3 max-h-64 overflow-y-auto whitespace-pre-wrap rounded-xl border border-white/8 bg-black/20 p-4 text-sm leading-7 text-zinc-300">{chapter.narration.explainer}</div>
+        </div>:null}
+
+        {chapter.narration?.segments.length?<div className="space-y-3">
+          {chapter.narration.segments.map((segment)=>{
+            const page=production?.pages.find((item)=>item.id===segment.pageId);
+            return <article key={segment.id} className="grid gap-4 rounded-2xl border border-white/10 bg-[#0d1017] p-4 md:grid-cols-[180px_1fr]">
+              <div>{page?.composedImageDataUrl?<img src={page.composedImageDataUrl} alt="" className="h-40 w-full rounded-xl bg-black object-contain"/>:<div className="grid h-40 place-items-center rounded-xl border border-dashed border-white/10 text-xs text-zinc-600">Page {segment.pageNumber} image pending</div>}<div className="mt-2 text-xs font-bold text-violet-300">Visual Page {segment.pageNumber}</div></div>
+              <div><p className="text-sm leading-6 text-zinc-300">{segment.text}</p><div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-zinc-500">{segment.durationMs?<span>{(segment.durationMs/1000).toFixed(1)}s exact screen duration</span>:<span>Audio pending</span>}{segment.audioDataUrl&&<audio controls preload="metadata" src={segment.audioDataUrl} className="h-8 max-w-full"/>}</div></div>
+            </article>
+          })}
+        </div>:<div className="rounded-2xl border border-dashed border-white/10 p-8 text-center text-sm text-zinc-600">Visuals plan होने के बाद Step 1 से explainer और image-sync narration plan बनाओ।</div>}
+
+        {videoUrl&&<div className="rounded-2xl border border-emerald-500/20 bg-[#0d1017] p-5"><div className="font-bold text-emerald-300">Final synchronized video ready</div><video controls src={videoUrl} className="mt-4 aspect-video w-full rounded-xl bg-black"/><a href={videoUrl} download={`${safeFilePart(project.name)}-${safeFilePart(chapter.title)}-explainer.webm`} className="mt-4 inline-flex rounded-xl bg-emerald-500 px-4 py-3 text-sm font-black text-black"><Download className="mr-2" size={16}/> Download Video</a></div>}
       </section>}
 
       {tab==="export"&&<section className="rounded-2xl border border-white/10 bg-[#0d1017] p-5"><h2 className="font-bold">Export Manga</h2><p className="mt-1 text-sm text-zinc-500">Download complete composed manga pages or export the production JSON.</p><div className="mt-4 flex flex-wrap gap-2"><button onClick={()=>{const data=`data:application/json;charset=utf-8,${encodeURIComponent(JSON.stringify({projectId:project.id,chapterId:chapter.id,manga:production},null,2))}`;downloadDataUrl(data,`${project.name}-${chapter.title}-manga.json`)}} disabled={!production||!!busy} className="rounded-xl bg-violet-500 px-4 py-2 text-sm font-bold disabled:opacity-40">Export Manga JSON</button>{production?.pages.filter((page)=>page.composedImageDataUrl).map((page)=><button key={page.id} disabled={!!busy} onClick={()=>downloadDataUrl(page.composedImageDataUrl!,`${safeFilePart(project.name)}-chapter-${pad(chapterNumber,2)}-page-${pad(page.pageNumber,3)}.jpg`)} className="rounded-xl border border-white/10 px-4 py-2 text-sm disabled:opacity-50">{chapter.title} · Page {page.pageNumber}</button>)}</div></section>}
