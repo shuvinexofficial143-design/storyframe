@@ -16,7 +16,7 @@ import {MANGA_STYLE_PRESETS,type MangaChapterProduction,type MangaMasterAnalysis
 import {downloadDataUrl} from "@/lib/manga-production/composer";
 import {continuationContextText,getInheritedMangaStyle,getPreviousChapterContinuity,getPreviousRenderedMangaPage} from "@/lib/manga-production/chapter-continuity";
 import {requestQueuedMangaImage} from "@/lib/manga-production/image-request-queue";
-import {DEFAULT_TTS_STYLE,DEFAULT_TTS_VOICE,STORYFRAME_TTS_VOICES} from "@/lib/tts-voices";
+import {DEFAULT_TTS_VOICE,STORYFRAME_TTS_VOICES} from "@/lib/tts-voices";
 
 const now=()=>new Date().toISOString();
 const wait=(ms:number)=>new Promise<void>((resolve)=>setTimeout(resolve,ms));
