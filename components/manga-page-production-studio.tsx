@@ -61,7 +61,7 @@ export function MangaPageProductionStudio(){
   const [error,setError]=useState("");
   const [pacingPreset,setPacingPreset]=useState<MangaPacingPreset>("Balanced");
   const [narrationVoice,setNarrationVoice]=useState(DEFAULT_TTS_VOICE);
-  const [narrationStyle,setNarrationStyle]=useState("Warm cinematic Hindi storyteller. Sound conversational and engaging, not like a document reader. Use natural pauses, curiosity, tension and emotional emphasis. Keep pronunciation clear and human.");
+  const [narrationStyle,setNarrationStyle]=useState("Fast-paced Hindi fantasy/anime recap voice. Speak like the protagonist is personally recounting what is happening right now: direct, energetic, confident and slightly raw. Keep sentences short, transitions quick, and emphasize sudden danger, attacks, wins, losses, ranks, numbers, rewards and discoveries when present. Use natural micro-pauses after strong actions and reveals, but do not become theatrical or documentary-like. Avoid formal newsreader cadence and avoid reading every line with the same rhythm. Pronunciation must stay clear and human.");
   const [videoUrl,setVideoUrl]=useState("");
   const busyRef=useRef(busy);
   // eslint-disable-next-line react-hooks/refs -- imperative browser-event bridge reads the latest busy state without re-subscribing.

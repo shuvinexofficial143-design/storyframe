@@ -2,7 +2,7 @@ import {narrationAccessToken,narrationProjectId} from "./narration-google-auth";
 
 export const DEFAULT_NARRATION_TTS_MODEL="gemini-3.1-flash-tts-preview";
 export const DEFAULT_NARRATION_VOICE="Kore";
-export const DEFAULT_NARRATION_STYLE="Warm cinematic Hindi storyteller. Sound conversational and engaging, not like a document reader. Use natural pauses, curiosity, tension and emotional emphasis. Keep pronunciation clear and human.";
+export const DEFAULT_NARRATION_STYLE="Fast-paced Hindi fantasy/anime recap voice. Speak like the protagonist is personally recounting what is happening right now: direct, energetic, confident and slightly raw. Keep sentences short, transitions quick, and emphasize sudden danger, attacks, wins, losses, ranks, numbers, rewards and discoveries when present. Use natural micro-pauses after strong actions and reveals, but do not become theatrical or documentary-like. Avoid formal newsreader cadence and avoid reading every line with the same rhythm. Pronunciation must stay clear and human.";
 
 export async function synthesizeNarrationSegment(input:{text:string;voice?:string;stylePrompt?:string;languageCode?:string}){
   const project=narrationProjectId();
