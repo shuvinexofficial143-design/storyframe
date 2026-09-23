@@ -811,7 +811,7 @@ export function MangaPageProductionStudio(){
     try{
       const canvas=document.createElement("canvas");canvas.width=1280;canvas.height=720;
       const ctx=canvas.getContext("2d");if(!ctx)throw new Error("Browser video canvas is unavailable.");
-      const loadedImages=[];
+      const loadedImages:HTMLImageElement[]=[];
       for(const item of ordered){
         const loaded=await loadVideoImage(item.page.composedImageDataUrl!);
         objectUrls.push(loaded.url);loadedImages.push(loaded.image);
@@ -819,7 +819,7 @@ export function MangaPageProductionStudio(){
 
       audioContext=new AudioContext();
       await audioContext.resume();
-      const buffers=[];
+      const buffers:AudioBuffer[]=[];
       for(let index=0;index<ordered.length;index+=1){
         setProgress(`Decoding narration audio ${index+1}/${ordered.length}…`);
         const bytes=await (await fetch(ordered[index].segment.audioDataUrl!)).arrayBuffer();
