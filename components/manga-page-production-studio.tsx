@@ -60,7 +60,7 @@ export function MangaPageProductionStudio(){
   const [notice,setNotice]=useState("");
   const [error,setError]=useState("");
   const [pacingPreset,setPacingPreset]=useState<MangaPacingPreset>("Balanced");
-  const [narrationVoice,setNarrationVoice]=useState(DEFAULT_TTS_VOICE);
+  const [narrationVoice,setNarrationVoice]=useState<string>(DEFAULT_TTS_VOICE);
   const [narrationStyle,setNarrationStyle]=useState("Fast-paced Hindi fantasy/anime recap voice. Speak like the protagonist is personally recounting what is happening right now: direct, energetic, confident and slightly raw. Keep sentences short, transitions quick, and emphasize sudden danger, attacks, wins, losses, ranks, numbers, rewards and discoveries when present. Use natural micro-pauses after strong actions and reveals, but do not become theatrical or documentary-like. Avoid formal newsreader cadence and avoid reading every line with the same rhythm. Pronunciation must stay clear and human.");
   const [videoUrl,setVideoUrl]=useState("");
   const busyRef=useRef(busy);
