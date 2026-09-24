@@ -864,18 +864,25 @@ export function MangaPageProductionStudio(){
       const drawAnimated=(image:HTMLImageElement,progress:number,index:number)=>{
         ctx.fillStyle="#000";ctx.fillRect(0,0,canvas.width,canvas.height);
         const p=Math.max(0,Math.min(1,progress));
-        // Use cover rather than contain so every frame has real room to move; the old
-        // contain fit often had zero freeX/freeY and therefore looked almost static.
-        const baseScale=Math.max(canvas.width/image.naturalWidth,canvas.height/image.naturalHeight);
-        const mode=index%6;
         const eased=.5-.5*Math.cos(Math.PI*p);
-        const zoomStart=mode===4?1.16:1.07;
-        const zoomEnd=mode===4?1.07:(mode===5?1.19:1.16);
-        const zoom=zoomStart+(zoomEnd-zoomStart)*eased;
-        const scale=baseScale*zoom;
+
+        // Cinematic background may crop, but the actual manga page NEVER does.
+        const cover=Math.max(canvas.width/image.naturalWidth,canvas.height/image.naturalHeight)*1.06;
+        const bgW=image.naturalWidth*cover,bgH=image.naturalHeight*cover;
+        ctx.save();ctx.globalAlpha=.32;ctx.filter="blur(18px) brightness(0.55)";
+        ctx.drawImage(image,(canvas.width-bgW)/2,(canvas.height-bgH)/2,bgW,bgH);
+        ctx.restore();
+
+        // Keep the complete foreground page inside the frame at every animation point.
+        const contain=Math.min(canvas.width/image.naturalWidth,canvas.height/image.naturalHeight);
+        const mode=index%6;
+        const pulse=mode===4?1-.035*eased:.965+.035*eased;
+        const scale=contain*pulse;
         const width=image.naturalWidth*scale,height=image.naturalHeight*scale;
-        const travelX=Math.min(canvas.width*.10,Math.max(18,(width-canvas.width)/2));
-        const travelY=Math.min(canvas.height*.09,Math.max(14,(height-canvas.height)/2));
+        const safeX=Math.max(0,(canvas.width-width)/2);
+        const safeY=Math.max(0,(canvas.height-height)/2);
+        const travelX=Math.min(canvas.width*.025,safeX*.55);
+        const travelY=Math.min(canvas.height*.025,safeY*.55);
         let panX=0,panY=0;
         if(mode===0)panX=(eased-.5)*2*travelX;
         if(mode===1)panX=(.5-eased)*2*travelX;
@@ -883,60 +890,74 @@ export function MangaPageProductionStudio(){
         if(mode===3)panY=(.5-eased)*2*travelY;
         if(mode===4){panX=(eased-.5)*travelX;panY=(.5-eased)*travelY;}
         if(mode===5){panX=(.5-eased)*travelX;panY=(eased-.5)*travelY;}
-        ctx.drawImage(image,(canvas.width-width)/2-panX,(canvas.height-height)/2-panY,width,height);
+        ctx.drawImage(image,(canvas.width-width)/2+panX,(canvas.height-height)/2+panY,width,height);
       };
 
-      recorder.start(2000);
+      const loadSegmentAsset=async(index:number)=>{
+        const item=ordered[index];
+        const [image,audioResponse]=await Promise.all([
+          loadVideoImage(item.page.composedImageDataUrl!),
+          fetch(item.segment.audioDataUrl!)
+        ]);
+        if(!audioResponse.ok)throw new Error(`Visual Page ${item.segment.pageNumber} audio could not be loaded.`);
+        const bytes=await audioResponse.arrayBuffer();
+        const buffer=await audioContext!.decodeAudioData(bytes);
+        return {image,buffer};
+      };
+
+      // Critical sync rule: never start MediaRecorder while waiting on network/image decode.
+      // The old exporter recorded those loading gaps, which made visuals fall behind narration.
+      setProgress("Preloading first synchronized page…");
+      let currentAsset=await loadSegmentAsset(0);
+      recorder.start(1000);
       let totalSeconds=0;
 
       for(let index=0;index<ordered.length;index+=1){
         const item=ordered[index];
-        setProgress(`Building video ${index+1}/${ordered.length} · loading Visual Page ${item.segment.pageNumber}…`);
-
-        // Keep only ONE decoded manga page and ONE decoded audio clip in memory at a time.
-        const image=await loadVideoImage(item.page.composedImageDataUrl!);
-
-        const audioResponse=await fetch(item.segment.audioDataUrl!);
-        if(!audioResponse.ok)throw new Error(`Visual Page ${item.segment.pageNumber} audio could not be loaded.`);
-        const bytes=await audioResponse.arrayBuffer();
-        const buffer=await audioContext.decodeAudioData(bytes);
+        const {image,buffer}=currentAsset;
         totalSeconds+=buffer.duration;
 
+        // Load the NEXT page while the current narration is playing. This hides almost all
+        // asset-loading time without recording stale frames.
+        const nextPromise=index+1<ordered.length?loadSegmentAsset(index+1):null;
+
         const source=audioContext.createBufferSource();
-        source.buffer=buffer;
-        source.connect(destination);
+        source.buffer=buffer;source.connect(destination);
         const ended=new Promise<void>((resolve)=>{source.onended=()=>resolve()});
-        const startTime=audioContext.currentTime+.06;
+        const startTime=audioContext.currentTime+.04;
+        drawAnimated(image,0,index);
         source.start(startTime);
 
         let animationActive=true;
-        const animateFrame=()=>{
+        let lastDraw=0;
+        const frameInterval=1000/fps;
+        const animateFrame=(stamp:number)=>{
           if(!animationActive)return;
-          const elapsed=Math.max(0,audioContext!.currentTime-startTime);
-          drawAnimated(image,buffer.duration>0?elapsed/buffer.duration:1,index);
+          if(stamp-lastDraw>=frameInterval){
+            const elapsed=Math.max(0,audioContext!.currentTime-startTime);
+            drawAnimated(image,buffer.duration>0?elapsed/buffer.duration:1,index);
+            lastDraw=stamp;
+          }
           requestAnimationFrame(animateFrame);
         };
-        drawAnimated(image,0,index);
         requestAnimationFrame(animateFrame);
+        setProgress(`Building ${index+1}/${ordered.length} · Visual Page ${item.segment.pageNumber} · ${buffer.duration.toFixed(1)}s…`);
 
-        setProgress(`Recording ${index+1}/${ordered.length} · animated Visual Page ${item.segment.pageNumber} · ${buffer.duration.toFixed(1)}s…`);
         await ended;
         animationActive=false;
         drawAnimated(image,1,index);
         source.disconnect();
 
-        // Give captureStream enough time to commit the final frame before swapping the
-        // decoded image. Without this, MediaRecorder can keep audio moving while the
-        // video track is still showing an older page, especially near the end on mobile.
-        await new Promise<void>((resolve)=>setTimeout(resolve,Math.ceil(2000/fps)));
-        image.src="";
+        if(nextPromise){
+          currentAsset=await nextPromise;
+          image.src="";
+        }else image.src="";
       }
 
-      // Flush the last visual frame into the recorder before stopping. This prevents
-      // the final narration tail from outrunning the final manga page.
-      await new Promise<void>((resolve)=>setTimeout(resolve,Math.ceil(3000/fps)));
+      // One short frame interval is enough to commit the last canvas state; long artificial
+      // waits made exports slower and could create a visible frozen tail.
+      await new Promise<void>((resolve)=>setTimeout(resolve,Math.ceil(1000/fps)));
       recorder.requestData();
-      await new Promise<void>((resolve)=>setTimeout(resolve,120));
       recorder.stop();await stopped;
       combined.getTracks().forEach((track)=>track.stop());
 
