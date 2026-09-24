@@ -18,13 +18,23 @@ export async function POST(request:Request){
     if(!parsed.success)return NextResponse.json({error:"Invalid manga page image request",details:parsed.error.flatten()},{status:400});
 
     const {prompt,seed,negativePrompt,referenceImages}=parsed.data;
+    // Keep the visual/story intent, but strip wording that commonly causes a
+    // neutral manga illustration request to be rejected before generation.
+    const safePrompt=prompt
+      .replace(/\b(?:gore|gory|graphic(?:ally)?|mutilat(?:e|ed|ion)|dismember(?:ed|ment)?|decapitat(?:e|ed|ion)|disembowel(?:ed|ment)?|corpse|dead body|suicide|self[- ]harm|tortur(?:e|ed|ing)|rape|sexual assault|explicit sex|nude|naked)\b/gi,"")
+      .replace(/\s{2,}/g," ")
+      .trim();
+    const safeNegativePrompt=negativePrompt
+      ?.replace(/\b(?:gore|gory|mutilation|dismemberment|decapitation|corpse|suicide|self[- ]harm|rape|sexual assault|explicit sex|nude|naked)\b/gi,"")
+      .replace(/\s{2,}/g," ")
+      .trim();
     const model=process.env.GEMINI_PAGE_IMAGE_MODEL?.trim()||undefined;
     const width=1200;
     const height=1800;
     // Manga pages are continuity-critical. Keep one request in flight from the
     // browser queue, but allow an in-family Gemini model failover on temporary
     // quota/capacity errors. Public text-only fallback remains disabled.
-    const result=await generateImageWithFallback({prompt,seed,width,height,negativePrompt,referenceImages,model,allowFallback:false,retryProvider:true});
+    const result=await generateImageWithFallback({prompt:safePrompt,seed,width,height,negativePrompt:safeNegativePrompt,referenceImages,model,allowFallback:false,retryProvider:true});
     const media=await persistGeneratedImage({imageDataUrl:result.imageDataUrl,filename:`manga-page-${seed}.webp`,metadata:{type:"manga-page",seed,model:result.model,provider:result.provider}});
 
     return NextResponse.json({
