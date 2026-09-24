@@ -198,6 +198,24 @@ export function MangaPageProductionStudio(){
   },[]);
 
   useEffect(()=>{
+    const handler=(event:Event)=>{
+      const detail=(event as CustomEvent<{state:MangaStudioState|null}>).detail;
+      if(detail?.state?.projects?.length){
+        stateRef.current=detail.state;
+        setState(detail.state);
+        return;
+      }
+      const fresh=createProject("My Manga Project");
+      const next={activeProjectId:fresh.id,projects:[fresh]};
+      stateRef.current=next;
+      setState(next);
+      setTab("story");
+    };
+    window.addEventListener("storyframe:manga-projects-updated",handler);
+    return()=>window.removeEventListener("storyframe:manga-projects-updated",handler);
+  },[]);
+
+  useEffect(()=>{
     let cancelled=false;
     loadStudioState().then((saved)=>{
       if(!cancelled&&saved?.projects?.length){stateRef.current=saved;setState(saved)}
@@ -958,10 +976,10 @@ export function MangaPageProductionStudio(){
         <div className="rounded-2xl border border-violet-500/20 bg-[#0d1017] p-5">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div><div className="flex items-center gap-2 text-lg font-bold"><Mic2 size={18} className="text-violet-300"/> Narration & Video</div><p className="mt-1 max-w-3xl text-sm text-zinc-500">यह pipeline image generation और story analysis auth से अलग है। Explainer को visual-page segments में बाँटा जाता है, हर segment का अलग TTS बनता है, फिर उसी exact audio duration पर matching image लगाकर video export होता है।</p></div>
-            <div className="flex flex-wrap gap-2">
-              <button disabled={!!busy||!production?.pages.length} onClick={()=>void generateNarrationPlan()} className="rounded-xl border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-xs font-bold text-violet-100 disabled:opacity-40"><Sparkles className="mr-1 inline" size={13}/> 1. Generate Explainer + Sync Plan</button>
-              <button disabled={!!busy||!chapter.narration?.segments.length} onClick={()=>void generateNarrationAudio()} className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs font-bold text-cyan-100 disabled:opacity-40"><Mic2 className="mr-1 inline" size={13}/> 2. Generate Audio</button>
-              <button disabled={!!busy||!chapter.narration?.segments.every((item)=>item.audioDataUrl)||!production?.pages.every((page)=>page.composedImageDataUrl)} onClick={()=>void exportNarrationVideo()} className="rounded-xl bg-emerald-500 px-3 py-2 text-xs font-black text-black disabled:opacity-40"><Film className="mr-1 inline" size={13}/> 3. Build Video</button>
+            <div className="grid w-full grid-cols-1 gap-2 sm:w-auto sm:grid-cols-3">
+              <button disabled={!!busy||!production?.pages.length} onClick={()=>void generateNarrationPlan()} className="min-h-11 w-full whitespace-nowrap rounded-xl border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-xs font-bold text-violet-100 disabled:opacity-40"><Sparkles className="mr-1 inline" size={13}/> 1. Explainer + Sync</button>
+              <button disabled={!!busy||!chapter.narration?.segments.length} onClick={()=>void generateNarrationAudio()} className="min-h-11 w-full whitespace-nowrap rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs font-bold text-cyan-100 disabled:opacity-40"><Mic2 className="mr-1 inline" size={13}/> 2. Generate Voice</button>
+              <button disabled={!!busy||!chapter.narration?.segments.every((item)=>item.audioDataUrl)||!production?.pages.every((page)=>page.composedImageDataUrl)} onClick={()=>void exportNarrationVideo()} className="min-h-11 w-full whitespace-nowrap rounded-xl bg-emerald-500 px-3 py-2 text-xs font-black text-black disabled:opacity-40"><Film className="mr-1 inline" size={13}/> 3. Build Video</button>
             </div>
           </div>
           <div className="mt-4 grid gap-3 md:grid-cols-[220px_1fr]">

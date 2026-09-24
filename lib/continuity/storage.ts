@@ -67,3 +67,45 @@ export async function saveStudioState(state:MangaStudioState):Promise<void>{
   const normalized=pruneOversizedRequestMedia(applyBrowserModel(state));
   await new Promise<void>((resolve,reject)=>{const tx=db.transaction(STORE,"readwrite");tx.objectStore(STORE).put(normalized,STATE_KEY);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error)});
 }
+
+
+export async function replaceStudioState(state:MangaStudioState|null):Promise<void>{
+  if(typeof indexedDB==="undefined")return;
+  const db=await openDb();
+  await new Promise<void>((resolve,reject)=>{
+    const tx=db.transaction(STORE,"readwrite");
+    const store=tx.objectStore(STORE);
+    if(state?.projects?.length)store.put(pruneOversizedRequestMedia(applyBrowserModel(state)),STATE_KEY);
+    else store.delete(STATE_KEY);
+    tx.oncomplete=()=>resolve();
+    tx.onerror=()=>reject(tx.error);
+  });
+}
+
+export async function deleteStudioProject(projectId:string):Promise<MangaStudioState|null>{
+  const current=await loadStudioState();
+  if(!current)return null;
+  const projects=current.projects.filter((project)=>project.id!==projectId);
+  if(!projects.length){
+    await replaceStudioState(null);
+    return null;
+  }
+  const next:MangaStudioState={
+    activeProjectId:projects.some((project)=>project.id===current.activeProjectId)?current.activeProjectId:projects[0].id,
+    projects
+  };
+  await replaceStudioState(next);
+  return next;
+}
+
+export async function clearAllStudioProjects():Promise<void>{
+  await replaceStudioState(null);
+}
+
+export function clearProjectLocalKeys(project:{id:string;chapters?:Array<{id:string}>}){
+  if(typeof localStorage==="undefined")return;
+  try{
+    localStorage.removeItem(`manga-style-${project.id}`);
+    for(const chapter of project.chapters||[])localStorage.removeItem(`manga-style-${chapter.id}`);
+  }catch{}
+}
