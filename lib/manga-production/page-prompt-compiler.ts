@@ -108,13 +108,10 @@ export function compileMangaPagePrompt(input:{
     if(sensitivePanel){
       return [
         `PANEL ${panel.panelNumber} — EXACT SLOT ${box}.`,
-        "SAFETY REPLACEMENT PANEL: do not depict the sensitive event or its explicit details.",
-        `Visible characters: ${panel.characters.join(", ")||"none"}.`,
-        `Location: ${panel.location||"same established location"}.`,
-        "Replace the blocked moment with a non-graphic continuity bridge: character reaction, environment cutaway, silhouette, obscured foreground, cropped framing, or soft depth-of-field blur.",
-        `Camera continuity: ${panel.cameraShot}; ${panel.cameraAngle}; screen direction ${panel.cameraDirection}.`,
-        `Lighting and mood: ${panel.lighting}; ${panel.mood}.`,
-        "No readable text, speech balloon, caption, system text, graphic injury, nudity, or explicit sensitive detail."
+        "SAFETY PLACEHOLDER PANEL. The original story content for this slot is intentionally omitted and MUST NOT be inferred or recreated.",
+        `Location continuity only: ${imageSafeStoryText(panel.location||"same established location")}.`,
+        "Render an abstract heavily blurred manga background / soft screentone gradient with no identifiable action, anatomy, injury, intimate detail, weapon use, or sensitive event.",
+        "No people are required in this placeholder. No readable text, speech balloon, caption, system text, graphic detail, nudity, or explicit content."
       ].join("\n");
     }
     const stateLines=Object.entries(panel.characterStates).map(([name,state])=>`${name}: location ${state.currentLocation}; position ${state.position}; direction ${state.bodyDirection}; pose ${state.pose}; expression ${state.expression}; outfit ${state.currentOutfit}; held ${state.heldObjects.join(", ")||"nothing"}; injuries ${state.injuries.join(", ")||"none"}; wet=${state.wetClothes}; dirty=${state.dirtyClothes}`).join(" | ");
