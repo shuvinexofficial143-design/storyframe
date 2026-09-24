@@ -189,7 +189,6 @@ export async function generateImageWithFallback(input:ImageGenerationInput):Prom
       throw error;
     }
 
-    if(input.allowFallback===false)throw error;
     const fallback=await executeProvider(pollinationsImageProvider,{...input,model:pollinationsImageProvider.defaultModel,referenceImages:[]});
     return {...fallback,fallbackUsed:true,primaryError,warning:`${desired.name} primary generation was unavailable after retrying, so StoryFrame used Pollinations flux-anime fallback. ${primaryError}`};
   }
