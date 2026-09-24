@@ -154,6 +154,9 @@ async function executeProvider(provider:ImageProvider,input:ImageGenerationInput
 
 export function isRetryableImageProviderFailure(error:unknown){
   if(!(error instanceof Error))return false;
+  // Safety/policy prompt blocks are deterministic for the same request. Do not
+  // mislabel them as temporary capacity failures or waste retries/backoff.
+  if(/PROHIBITED_CONTENT|blockReason["']?\s*:\s*["']?(?:PROHIBITED_CONTENT|SAFETY)|prompt(?:Feedback)?[^\n]{0,120}\bblocked\b/i.test(error.message))return false;
   return /\b429\b|resource exhausted|quota|rate limit|too many requests|temporar(?:y|ily) unavailable|\b50[0234]\b|timed out|timeout/i.test(error.message);
 }
 
