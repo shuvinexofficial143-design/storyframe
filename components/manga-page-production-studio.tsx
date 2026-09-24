@@ -847,11 +847,22 @@ export function MangaPageProductionStudio(){
       recorder.ondataavailable=(event)=>{if(event.data.size)chunks.push(event.data)};
       const stopped=new Promise<void>((resolve)=>{recorder.onstop=()=>resolve()});
 
-      const draw=(image:HTMLImageElement)=>{
+      const drawAnimated=(image:HTMLImageElement,progress:number,index:number)=>{
         ctx.fillStyle="#000";ctx.fillRect(0,0,canvas.width,canvas.height);
-        const scale=Math.min(canvas.width/image.naturalWidth,canvas.height/image.naturalHeight);
+        const p=Math.max(0,Math.min(1,progress));
+        const baseScale=Math.min(canvas.width/image.naturalWidth,canvas.height/image.naturalHeight);
+        const mode=index%4;
+        const zoom=mode===3?1.10-(.08*p):1.02+(.08*p);
+        const scale=baseScale*zoom;
         const width=image.naturalWidth*scale,height=image.naturalHeight*scale;
-        ctx.drawImage(image,(canvas.width-width)/2,(canvas.height-height)/2,width,height);
+        const freeX=Math.max(0,(width-canvas.width)/2);
+        const freeY=Math.max(0,(height-canvas.height)/2);
+        let panX=0,panY=0;
+        if(mode===0)panY=(.5-p)*Math.min(canvas.height*.07,Math.max(10,freeY));
+        if(mode===1)panX=(p-.5)*Math.min(canvas.width*.08,Math.max(12,freeX));
+        if(mode===2){panX=(.5-p)*Math.min(canvas.width*.06,Math.max(10,freeX));panY=(p-.5)*Math.min(canvas.height*.05,Math.max(8,freeY));}
+        if(mode===3)panY=(p-.5)*Math.min(canvas.height*.04,Math.max(8,freeY));
+        ctx.drawImage(image,(canvas.width-width)/2-panX,(canvas.height-height)/2-panY,width,height);
       };
 
       recorder.start(2000);
@@ -863,7 +874,6 @@ export function MangaPageProductionStudio(){
 
         // Keep only ONE decoded manga page and ONE decoded audio clip in memory at a time.
         const image=await loadVideoImage(item.page.composedImageDataUrl!);
-        draw(image);
 
         const audioResponse=await fetch(item.segment.audioDataUrl!);
         if(!audioResponse.ok)throw new Error(`Visual Page ${item.segment.pageNumber} audio could not be loaded.`);
@@ -875,10 +885,23 @@ export function MangaPageProductionStudio(){
         source.buffer=buffer;
         source.connect(destination);
         const ended=new Promise<void>((resolve)=>{source.onended=()=>resolve()});
-        source.start(audioContext.currentTime+.06);
+        const startTime=audioContext.currentTime+.06;
+        source.start(startTime);
 
-        setProgress(`Recording ${index+1}/${ordered.length} · Visual Page ${item.segment.pageNumber} · ${buffer.duration.toFixed(1)}s…`);
+        let animationActive=true;
+        const animateFrame=()=>{
+          if(!animationActive)return;
+          const elapsed=Math.max(0,audioContext!.currentTime-startTime);
+          drawAnimated(image,buffer.duration>0?elapsed/buffer.duration:1,index);
+          requestAnimationFrame(animateFrame);
+        };
+        drawAnimated(image,0,index);
+        requestAnimationFrame(animateFrame);
+
+        setProgress(`Recording ${index+1}/${ordered.length} · animated Visual Page ${item.segment.pageNumber} · ${buffer.duration.toFixed(1)}s…`);
         await ended;
+        animationActive=false;
+        drawAnimated(image,1,index);
         source.disconnect();
 
         // Release decoded image immediately before moving to the next page.
@@ -893,7 +916,7 @@ export function MangaPageProductionStudio(){
       const url=URL.createObjectURL(blob);
       if(videoUrl)URL.revokeObjectURL(videoUrl);
       setVideoUrl(url);
-      setNotice(`Video ready · ${Math.round(totalSeconds)}s · ${mobile?"mobile-safe 480p":"720p"} export · each image changes at its matching narration boundary.`);
+      setNotice(`Video ready · ${Math.round(totalSeconds)}s · ${mobile?"mobile-safe 480p":"720p"} export · synced image changes + gentle cinematic pan/zoom motion.`);
     }catch(reason){
       setError(reason instanceof Error?reason.message:"Video export failed.");
     }finally{
