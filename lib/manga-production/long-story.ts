@@ -21,9 +21,16 @@ const InitialState=z.object({characterName:z.string().min(1),currentLocation:z.s
 const GlobalOutput=z.object({storySummary:z.string().min(1),characters:z.array(Character).default([]),locations:z.array(Location).default([]),props:z.array(Prop).default([]),timeline:z.array(Timeline).default([]),initialCharacterStates:z.array(InitialState).default([])});
 const Beat=z.object({sourceText:z.string().default(""),storyBeat:z.string().min(1),type:z.enum(["action","reaction","reveal","dialogue","transition","environment","object","emotion"]).default("action"),characterNames:z.array(z.string()).default([]),locationName:z.string().default(""),action:z.string().default(""),reaction:z.string().default(""),dialogue:z.array(Dialogue).default([]),importantProps:z.array(z.string()).default([]),stateAfter:z.string().default("")});
 const BeatOutput=z.object({beats:z.array(Beat).min(1).max(90),chunkEndState:z.string().min(1)});
+const ChunkOutput=BeatOutput.extend({
+  chunkSummary:z.string().min(1),
+  characters:z.array(Character).default([]),
+  locations:z.array(Location).default([]),
+  props:z.array(Prop).default([]),
+  timeline:z.array(Timeline).default([]),
+  initialCharacterStates:z.array(InitialState).default([])
+});
 
-const GLOBAL_SYSTEM=`You are StoryFrame Manga Director. Return strict JSON only. This is the GLOBAL continuity pass for a long story. Extract stable reusable Character, Location and Prop bibles, a compact whole-story summary, chronological timeline and initial physical state. Preserve story facts and chronology. Do not invent major events. Existing locked StoryFrame entities are authoritative. Do NOT produce panel beats in this pass.`;
-const BEAT_SYSTEM=`You are StoryFrame Manga Beat Director. Return strict JSON only. Visible dialogue is selective because final video narration carries explanation: retain only short plot-essential spoken lines, strong reactions, or critical system/quest/reward information; avoid redundant narration and long stat dumps. Convert ONLY the supplied story chunk into extremely small sequential visual beats. One beat equals ONE visible action, ONE visible reaction, ONE reveal, ONE dialogue turn with visible acting, ONE object insert, or ONE explicit transition. Never compress a multi-step event. Never reorder or skip important chunk events. The GLOBAL bibles are authoritative. Start exactly from PREVIOUS CHUNK END STATE, and end with an explicit chunkEndState for the next chunk. Source text stays in the original language.`;
+const BEAT_SYSTEM=`You are StoryFrame Manga Long-Story Director. Return strict JSON only. Analyze ONLY the supplied story chunk. Do two jobs in the same response: (1) extract any new or updated reusable Character/Location/Prop continuity facts plus a compact chunk summary/timeline, and (2) convert this chunk into extremely small sequential visual beats. Existing locked/discovered bibles supplied in the prompt are authoritative: reuse them and only add/update facts explicitly supported by this chunk. Visible dialogue is selective because final video narration carries explanation: retain only short plot-essential spoken lines, strong reactions, or critical system/quest/reward information; avoid redundant narration and long stat dumps. One beat equals ONE visible action, ONE visible reaction, ONE reveal, ONE dialogue turn with visible acting, ONE object insert, or ONE explicit transition. Never compress a multi-step event. Never reorder or skip important chunk events. Start exactly from PREVIOUS CHUNK END STATE, and end with an explicit chunkEndState for the next chunk. Source text stays in the original language.`;
 
 function issueSummary(error:z.ZodError){return error.issues.slice(0,12).map((issue)=>`${issue.path.map(String).join(".")||"root"}: ${issue.message}`).join("; ")}
 async function requestValidated<T>(model:MangaMasterInput["analysisModel"],systemPrompt:string,userPrompt:string,schema:z.ZodType<T>,maxTokens:number){
@@ -41,7 +48,7 @@ async function requestValidated<T>(model:MangaMasterInput["analysisModel"],syste
   return parsed.data;
 }
 
-function splitLongStory(story:string,maxChars=12000){
+function splitLongStory(story:string,maxChars=7000){
   const paragraphs=story.split(/\n{2,}/).map((item)=>item.trim()).filter(Boolean);
   const chunks:string[]=[];let current="";
   const push=(piece:string)=>{
@@ -68,27 +75,103 @@ export function shouldUseLongStoryAnalysis(story:string){
   // emit every fine-grained beat at once. Route medium/long chapters through
   // the existing sequential chunk analyzer instead: one compact global pass,
   // then smaller ordered beat chunks that preserve continuity.
-  return story.length>9000||words>1800;
+  return story.length>6000||words>1200;
 }
 
 export async function analyzeLongMangaMaster(input:MangaMasterInput):Promise<MangaMasterAnalysis>{
   if(!isStoryAnalysisModel(input.analysisModel))throw new Error("Unsupported xKiro manga analysis model.");
   if(!MANGA_STYLE_PRESETS.includes(input.stylePreset))throw new Error("Unsupported manga style preset.");
   const style=MANGA_STYLE_PROMPTS[input.stylePreset];
-  const globalPrompt=`PROJECT: ${input.projectName}\nCHAPTER: ${input.chapterTitle}\nSTYLE: ${input.stylePreset} — ${style}\n\nEXISTING LOCKED CHARACTERS:\n${JSON.stringify(input.existingCharacters)}\n\nEXISTING LOCKED LOCATIONS:\n${JSON.stringify(input.existingLocations)}\n\nEXISTING LOCKED PROPS:\n${JSON.stringify(input.existingProps)}\n\nFULL STORY:\n${input.story}\n\nReturn exactly:\n{"storySummary":"compact whole-story summary","characters":[{"name":"","role":"","gender":"","approximateAge":"","face":{"shape":"","eyes":"","eyebrows":"","nose":"","mouth":"","specialFeatures":""},"hair":{"color":"","style":"","length":""},"body":{"build":"","height":"","proportions":""},"defaultOutfit":"","currentOutfit":"","accessories":[],"importantObjects":[],"consistencyNotes":""}],"locations":[{"name":"","architecture":"","layout":{},"importantProps":[],"lighting":"","timeOfDay":"","continuityNotes":""}],"props":[{"name":"","appearance":"","currentOwner":"","currentLocation":"","condition":"","continuityNotes":""}],"timeline":[{"sourceText":"","event":"","timeOfDay":"","location":"","characterNames":[],"propNames":[]}],"initialCharacterStates":[{"characterName":"","currentLocation":"","position":"","bodyDirection":"","pose":"","expression":"","currentOutfit":"","heldObjects":[],"injuries":[],"dirtyClothes":false,"wetClothes":false}]}`;
-  const global=await requestValidated(input.analysisModel,GLOBAL_SYSTEM,globalPrompt,GlobalOutput,12000);
   const chunks=splitLongStory(input.story);
+
   const beats:z.infer<typeof Beat>[]=[];
-  let previousState="Story start. Use the extracted initialCharacterStates as the authoritative opening physical state.";
+  const summaries:string[]=[];
+  const characters:z.infer<typeof Character>[]=[];
+  const locations:z.infer<typeof Location>[]=[];
+  const props:z.infer<typeof Prop>[]=[];
+  const timeline:z.infer<typeof Timeline>[]=[];
+  const openingStates:z.infer<typeof InitialState>[]=[];
+
+  const key=(value:string)=>value.trim().toLowerCase().replace(/\s+/g," ");
+  const upsertByName=<T extends {name:string}>(items:T[],incoming:T[])=>{
+    for(const item of incoming){
+      const index=items.findIndex((current)=>key(current.name)===key(item.name));
+      if(index>=0)items[index]={...items[index],...item};
+      else items.push(item);
+    }
+  };
+
+  let previousState="Story start. Use the first chunk facts and any existing locked StoryFrame entities as the authoritative opening physical state.";
+
   for(let index=0;index<chunks.length;index+=1){
     const chunk=chunks[index];
-    const prompt=`LONG STORY CHUNK ${index+1}/${chunks.length}\nMANGA STYLE: ${input.stylePreset} — ${style}\nGLOBAL SUMMARY: ${global.storySummary}\nGLOBAL CHARACTERS: ${JSON.stringify(global.characters)}\nGLOBAL LOCATIONS: ${JSON.stringify(global.locations)}\nGLOBAL PROPS: ${JSON.stringify(global.props)}\nPREVIOUS CHUNK END STATE: ${previousState}\n\nSOURCE CHUNK (analyze every important visible event in order):\n${chunk}\n\nReturn exactly {"beats":[{"sourceText":"exact source segment","storyBeat":"one immediately visible beat","type":"action|reaction|reveal|dialogue|transition|environment|object|emotion","characterNames":[],"locationName":"","action":"","reaction":"","dialogue":[{"speaker":"","text":"","emotion":"","bubbleType":"speech|thought|shout|whisper|narration"}],"importantProps":[],"stateAfter":"exact physical/story state after this beat"}],"chunkEndState":"exact state after the final beat, suitable for the next chunk"}. Do not repeat events already represented by PREVIOUS CHUNK END STATE.`;
-    const result=await requestValidated(input.analysisModel,BEAT_SYSTEM,prompt,BeatOutput,12000);
+    const knownCharacters=[...input.existingCharacters,...characters];
+    const knownLocations=[...input.existingLocations,...locations];
+    const knownProps=[...input.existingProps,...props];
+
+    const prompt=`LONG STORY CHUNK ${index+1}/${chunks.length}
+MANGA STYLE: ${input.stylePreset} — ${style}
+
+EXISTING + DISCOVERED LOCKED CHARACTERS (reuse exact identity; add only new/changed facts):
+${JSON.stringify(knownCharacters)}
+
+EXISTING + DISCOVERED LOCKED LOCATIONS:
+${JSON.stringify(knownLocations)}
+
+EXISTING + DISCOVERED LOCKED PROPS:
+${JSON.stringify(knownProps)}
+
+PREVIOUS CHUNK END STATE:
+${previousState}
+
+SOURCE CHUNK (analyze every important visible event in order):
+${chunk}
+
+Return exactly:
+{
+ "chunkSummary":"compact factual summary of only this chunk",
+ "characters":[{"name":"","role":"","gender":"","approximateAge":"","face":{"shape":"","eyes":"","eyebrows":"","nose":"","mouth":"","specialFeatures":""},"hair":{"color":"","style":"","length":""},"body":{"build":"","height":"","proportions":""},"defaultOutfit":"","currentOutfit":"","accessories":[],"importantObjects":[],"consistencyNotes":""}],
+ "locations":[{"name":"","architecture":"","layout":{},"importantProps":[],"lighting":"","timeOfDay":"","continuityNotes":""}],
+ "props":[{"name":"","appearance":"","currentOwner":"","currentLocation":"","condition":"","continuityNotes":""}],
+ "timeline":[{"sourceText":"","event":"","timeOfDay":"","location":"","characterNames":[],"propNames":[]}],
+ "initialCharacterStates":[{"characterName":"","currentLocation":"","position":"","bodyDirection":"","pose":"","expression":"","currentOutfit":"","heldObjects":[],"injuries":[],"dirtyClothes":false,"wetClothes":false}],
+ "beats":[{"sourceText":"exact source segment","storyBeat":"one immediately visible beat","type":"action|reaction|reveal|dialogue|transition|environment|object|emotion","characterNames":[],"locationName":"","action":"","reaction":"","dialogue":[{"speaker":"","text":"","emotion":"","bubbleType":"speech|thought|shout|whisper|narration"}],"importantProps":[],"stateAfter":"exact physical/story state after this beat"}],
+ "chunkEndState":"exact physical/story state after the final beat, suitable for the next chunk"
+}
+
+Rules:
+- Do NOT summarize or analyze any text outside this chunk.
+- Reuse existing/discovered entities instead of redesigning them.
+- characters/locations/props should contain only entities that are new in this chunk or whose factual state/description is updated by this chunk.
+- initialCharacterStates is required only for characters first appearing in this chunk; do not repeat unchanged opening states.
+- Do not repeat events already represented by PREVIOUS CHUNK END STATE.
+- Preserve chronology and all important visible actions/reactions.
+- Keep visible dialogue concise; narration audio will explain nonessential information.`;
+
+    const result=await requestValidated(input.analysisModel,BEAT_SYSTEM,prompt,ChunkOutput,12000);
+    summaries.push(result.chunkSummary);
+    upsertByName(characters,result.characters);
+    upsertByName(locations,result.locations);
+    upsertByName(props,result.props);
+    timeline.push(...result.timeline);
+    for(const item of result.initialCharacterStates){
+      const existing=openingStates.findIndex((current)=>key(current.characterName)===key(item.characterName));
+      if(existing<0)openingStates.push(item);
+    }
     beats.push(...result.beats);
     previousState=result.chunkEndState;
+
     if(beats.length>300)throw new Error("This story expands beyond StoryFrame's current 300 manga-beat chapter limit. Split it into multiple chapters so continuity can remain reliable.");
   }
 
+  const global={
+    storySummary:summaries.join(" → ").slice(0,12000),
+    characters,
+    locations,
+    props,
+    timeline,
+    initialCharacterStates:openingStates
+  };
   const initialCharacterStates:Record<string,MangaCharacterState>={};
   for(const item of global.initialCharacterStates){initialCharacterStates[item.characterName]={characterId:item.characterName,currentLocation:item.currentLocation,position:item.position,bodyDirection:item.bodyDirection,pose:item.pose,expression:item.expression,currentOutfit:item.currentOutfit,heldObjects:item.heldObjects,injuries:item.injuries,dirtyClothes:item.dirtyClothes,wetClothes:item.wetClothes}}
   return {
@@ -99,6 +182,6 @@ export async function analyzeLongMangaMaster(input:MangaMasterInput):Promise<Man
     timeline:global.timeline.map((item,index)=>({id:`timeline-${index+1}`,...item})),
     beats:beats.map((item,index)=>({id:`beat-${index+1}`,...item})),
     initialCharacterStates,
-    provider:`xKiro · ${input.analysisModel} · long-story sequential chunks`
+    provider:`xKiro · ${input.analysisModel} · fully chunked long-story analysis`
   };
 }
