@@ -48,7 +48,7 @@ async function requestValidated<T>(model:MangaMasterInput["analysisModel"],syste
   return parsed.data;
 }
 
-function splitLongStory(story:string,maxChars=7000){
+function splitLongStory(story:string,maxChars=4000){
   const paragraphs=story.split(/\n{2,}/).map((item)=>item.trim()).filter(Boolean);
   const chunks:string[]=[];let current="";
   const push=(piece:string)=>{
@@ -75,7 +75,7 @@ export function shouldUseLongStoryAnalysis(story:string){
   // emit every fine-grained beat at once. Route medium/long chapters through
   // the existing sequential chunk analyzer instead: one compact global pass,
   // then smaller ordered beat chunks that preserve continuity.
-  return story.length>6000||words>1200;
+  return story.length>4500||words>850;
 }
 
 export async function analyzeLongMangaMaster(input:MangaMasterInput):Promise<MangaMasterAnalysis>{
@@ -148,7 +148,7 @@ Rules:
 - Preserve chronology and all important visible actions/reactions.
 - Keep visible dialogue concise; narration audio will explain nonessential information.`;
 
-    const result=await requestValidated(input.analysisModel,BEAT_SYSTEM,prompt,ChunkOutput,12000);
+    const result=await requestValidated(input.analysisModel,BEAT_SYSTEM,prompt,ChunkOutput,9000);
     summaries.push(result.chunkSummary);
     upsertByName(characters,result.characters);
     upsertByName(locations,result.locations);
