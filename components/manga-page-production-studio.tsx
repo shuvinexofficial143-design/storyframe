@@ -70,6 +70,7 @@ export function MangaPageProductionStudio(){
   const storyGeneratorRunnerRef=useRef<()=>Promise<void>>(async()=>{});
   const activeAbortRef=useRef<AbortController|null>(null);
   const cancelRequestedRef=useRef(false);
+  const backgroundRunRef=useRef<string|null>(null);
 
   const beginCancelableTask=()=>{
     activeAbortRef.current?.abort();
@@ -92,6 +93,7 @@ export function MangaPageProductionStudio(){
     cancelRequestedRef.current=true;
     activeAbortRef.current?.abort();
     activeAbortRef.current=null;
+    if(backgroundRunRef.current)void fetch(`/api/manga/background-build/${backgroundRunRef.current}`,{method:"DELETE"}).catch(()=>undefined);
     const command=storyGeneratorCommandRef.current;
     storyGeneratorCommandRef.current=null;
     if(command){
@@ -187,17 +189,6 @@ export function MangaPageProductionStudio(){
   },[state,busy]);
 
   useEffect(()=>{
-    try{
-      const staleKeys:string[]=[];
-      for(let index=0;index<localStorage.length;index+=1){
-        const key=localStorage.key(index);
-        if(key?.startsWith("storyframe-manga-background-run:"))staleKeys.push(key);
-      }
-      staleKeys.forEach((key)=>localStorage.removeItem(key));
-    }catch{}
-  },[]);
-
-  useEffect(()=>{
     const handler=(event:Event)=>{
       const detail=(event as CustomEvent<{state:MangaStudioState|null}>).detail;
       if(detail?.state?.projects?.length){
@@ -234,6 +225,21 @@ export function MangaPageProductionStudio(){
   const chapter=useMemo(()=>project?.chapters.find((item)=>item.id===project.activeChapterId)||project?.chapters[0],[project]);
   if(!project||!chapter)return <div className="p-8 text-zinc-400">Loading Manga Studio…</div>;
   const production=chapter.manga;
+
+  useEffect(()=>{
+    if(!hydrated)return;
+    let runId="";
+    try{runId=localStorage.getItem(`storyframe-manga-background-run:${project.id}:${chapter.id}`)||""}catch{}
+    if(!runId||busyRef.current)return;
+    const controller=beginCancelableTask();
+    setError("");setNotice("Reconnected to the background manga job.");
+    void pollBackgroundRun(runId,controller.signal).catch((reason)=>{
+      if(!isAbortError(reason))setError(reason instanceof Error?reason.message:"Could not reconnect to background manga job.");
+    }).finally(()=>{finishCancelableTask(controller);setBusy("");setProgress("")});
+    return()=>controller.abort();
+    // Resume only when switching to a saved project/chapter or after initial hydration.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[hydrated,project.id,chapter.id]);
 
   const updateProject=(fn:(project:MangaProject)=>MangaProject)=>applyState((current)=>mutateProject(current,project.id,fn));
   const updateChapter=(fn:(chapter:MangaChapter)=>MangaChapter)=>updateProject((current)=>({...current,updatedAt:now(),chapters:current.chapters.map((item)=>item.id===chapter.id?fn(item):item)}));
@@ -381,60 +387,65 @@ export function MangaPageProductionStudio(){
     return {project:workingProject,production:workingProduction};
   };
 
+  const backgroundStorageKey=(projectId:string,chapterId:string)=>`storyframe-manga-background-run:${projectId}:${chapterId}`;
+
+  const applyBackgroundResult=(runId:string,result:{master:MangaMasterAnalysis;production:MangaChapterProduction})=>{
+    const current=stateRef.current;
+    const targetProject=current.projects.find((item)=>item.id===project.id);
+    const targetChapter=targetProject?.chapters.find((item)=>item.id===chapter.id);
+    if(!targetProject||!targetChapter)throw new Error("Local project/chapter no longer exists.");
+    const merged=mergeMangaMasterIntoProject(targetProject,targetChapter.id,result.master,result.production.stylePreset);
+    const nextProject:MangaProject={
+      ...targetProject,characters:merged.characters,locations:merged.locations,props:merged.props,updatedAt:now(),
+      chapters:targetProject.chapters.map((item)=>item.id===targetChapter.id?{...item,manga:result.production,updatedAt:now()}:item)
+    };
+    applyState((value)=>mutateProject(value,targetProject.id,()=>nextProject));
+    try{localStorage.removeItem(backgroundStorageKey(targetProject.id,targetChapter.id))}catch{}
+    backgroundRunRef.current=null;
+    void fetch(`/api/manga/background-build/${runId}?cleanup=1`,{method:"DELETE"}).catch(()=>undefined);
+    setTab("pages");
+    setNotice(`Background planning complete. ${result.master.beats.length} visual beats planned into ${result.production.pages.length} pages. Coverage ${result.production.coverage.percent}%.`);
+  };
+
+  const pollBackgroundRun=async(runId:string,signal?:AbortSignal)=>{
+    backgroundRunRef.current=runId;
+    setBusy("background");
+    while(!signal?.aborted){
+      const response=await fetch(`/api/manga/background-build/${runId}`,{cache:"no-store",signal});
+      const data=await parseJsonResponse<{status:string;phase:string;progress:string;error?:string;result?:{master:MangaMasterAnalysis;production:MangaChapterProduction}}>(response);
+      setProgress(data.progress||"Background manga build is running…");
+      if(data.status==="completed"&&data.result){applyBackgroundResult(runId,data.result);return}
+      if(data.status==="failed")throw new Error(data.error||"Background manga build failed.");
+      if(data.status==="cancelled"){setNotice("Background manga build cancelled. Local saved work was kept.");return}
+      await waitCancelable(3000,signal);
+    }
+  };
+
   const buildManga=async()=>{
     if(chapter.story.trim().length<20){setError("पहले पूरी story paste करो।");return}
     setTab("story");
     const controller=beginCancelableTask();
-    setBusy("master");setProgress(`Analyzing story · ${beatDetailLabel(pacingPreset)} beat detail…`);setError("");setNotice("");
+    setBusy("background");setProgress("Starting durable background manga analysis…");setError("");setNotice("");
     try{
-      const response=await fetch("/api/manga/production-plan",{
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({action:"master",projectName:project.name,chapterTitle:chapter.title,story:chapter.story,analysisModel:project.analysisModel,stylePreset:resolvedStyle,pacingPreset,existingCharacters:project.characters,existingLocations:project.locations,existingProps:project.props}),
-        signal:controller.signal
-      });
-      const master=(await parseJsonResponse<MasterResponse>(response)).data;
-      const merged=mergeMangaMasterIntoProject(project,chapter.id,master,resolvedStyle);
       const previousContinuity=getPreviousChapterContinuity(project,chapter.id);
-      const inheritedCharacters=previousContinuity?{...master.initialCharacterStates,...previousContinuity.characters}:master.initialCharacterStates;
       const chapterContext=continuationContextText(project,chapter.id);
-      const initialState={
-        currentPage:0,
-        timeline:previousContinuity?.timeline||master.timeline[0]?.event||"Story start",
-        timeOfDay:previousContinuity?.timeOfDay||master.timeline[0]?.timeOfDay||"unspecified",
-        currentLocation:previousContinuity?.currentLocation||master.timeline[0]?.location||"",
-        characters:inheritedCharacters,
-        activeProps:previousContinuity?.activeProps?.length?previousContinuity.activeProps:master.props.filter((item)=>item.currentOwner||item.currentLocation).map((item)=>item.name),
-        previousPageEndState:previousContinuity?.previousPageEndState||"Story start"
-      };
-      const initialProduction:MangaChapterProduction={
-        schemaVersion:1,
-        stylePreset:resolvedStyle,
-        pacingPreset,
-        storySummary:chapterContext?`${chapterContext}\nCurrent chapter summary: ${master.storySummary}`:master.storySummary,
-        timeline:master.timeline,
-        beats:master.beats,
-        locationProfiles:master.locations,
-        propStates:master.props,
-        initialCharacterStates:inheritedCharacters,
-        pages:[],
-        nextBeatIndex:0,
-        continuityState:initialState,
-        coverage:{percent:0,coveredBeatIds:[],missingBeats:master.beats.map((beat)=>({beatId:beat.id,storyBeat:beat.storyBeat,sourceText:beat.sourceText}))},
-        analysisProvider:master.provider,
-        updatedAt:now()
-      };
-      let nextProject:MangaProject={...project,characters:merged.characters,locations:merged.locations,props:merged.props,updatedAt:now(),chapters:project.chapters.map((item)=>item.id===chapter.id?{...item,manga:initialProduction,updatedAt:now()}:item)};
-      applyState((current)=>mutateProject(current,project.id,()=>nextProject));
-      setTab("script");
-      setProgress(`Story analyzed: ${master.beats.length} visual beats. Planning complete pages…`);
-      const planned=await planAllRemainingPages(nextProject,chapter.id,initialProduction,controller.signal);
-      nextProject=planned.project;
-      setTab("pages");
-      setNotice(`${beatDetailLabel(pacingPreset)} detail manga ready. ${master.beats.length} visual beats are planned into ${planned.production.pages.length} complete pages. Story coverage ${planned.production.coverage.percent}%.${previousContinuity?" Previous chapter continuity is locked in.":""}`);
+      const response=await fetch("/api/manga/background-build",{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          projectId:project.id,chapterId:chapter.id,projectName:project.name,chapterTitle:chapter.title,story:chapter.story,
+          analysisModel:project.analysisModel,stylePreset:resolvedStyle,pacingPreset,masterSeed:project.visualBible.masterSeed,
+          existingCharacters:project.characters,existingLocations:project.locations,existingProps:project.props,
+          previousContinuity,chapterContext
+        }),signal:controller.signal
+      });
+      const started=await parseJsonResponse<{runId:string;status:string;progress:string}>(response);
+      backgroundRunRef.current=started.runId;
+      try{localStorage.setItem(backgroundStorageKey(project.id,chapter.id),started.runId)}catch{}
+      setProgress(started.progress||"Background manga build queued…");
+      await pollBackgroundRun(started.runId,controller.signal);
     }catch(reason){
-      if(isAbortError(reason))setNotice("Manga build cancelled. Saved analysis/planning progress was kept.");
-      else setError(reason instanceof Error?reason.message:"Manga planning failed");
+      if(isAbortError(reason))setNotice("Background monitoring stopped. The server job can continue; reopen this chapter to reconnect.");
+      else setError(reason instanceof Error?reason.message:"Background manga build could not start.");
     }finally{
       finishCancelableTask(controller);
       setBusy("");setProgress("");
