@@ -21,6 +21,15 @@ function selectedPageImage(page?:MangaPage){
   return requestSafeImage(page.rawPageImageDataUrl||page.composedImageDataUrl);
 }
 
+function imageSafeStoryText(value:string){
+  return value
+    .replace(/\b(?:gore|gory|blood(?:y)?|bleeding|corpse|dead body|mutilat(?:e|ed|ion)|dismember(?:ed|ment)?|decapitat(?:e|ed|ion)|disembowel(?:ed|ment)?|tortur(?:e|ed|ing)|suicide|self[- ]harm|rape|sexual assault|explicit sex|nude|naked)\b/gi,"")
+    .replace(/\b(?:kill|killed|killing|murder|murdered|die|dies|died|death)\b/gi,"defeat")
+    .replace(/\b(?:stab|stabbed|stabbing|shoot|shot|shooting)\b/gi,"confront")
+    .replace(/\s{2,}/g," ")
+    .trim();
+}
+
 function styleSafePlannerNote(note:string,blackAndWhite:boolean){
   if(!note)return "";
   if(blackAndWhite)return note;
@@ -90,17 +99,17 @@ export function compileMangaPagePrompt(input:{
     const plannerNote=styleSafePlannerNote(panel.imagePrompt,blackAndWhite);
     return [
       `PANEL ${panel.panelNumber} — EXACT SLOT ${box}.`,
-      `Beat: ${panel.storyBeat}.`,
-      `Source context: ${panel.sourceText}.`,
+      `Beat: ${imageSafeStoryText(panel.storyBeat)}.`,
+      `Source context: ${imageSafeStoryText(panel.sourceText)}.`,
       `Visible characters: ${panel.characters.join(", ")||"none"}.`,
       stateLines?`Exact character state: ${stateLines}.`:"",
-      `Action: ${panel.action}. Pose: ${panel.pose}. Expression: ${panel.expression}. Body direction: ${panel.bodyDirection}. Positions: ${panel.characterPositions}.`,
+      `Action: ${imageSafeStoryText(panel.action)}. Pose: ${imageSafeStoryText(panel.pose)}. Expression: ${imageSafeStoryText(panel.expression)}. Body direction: ${panel.bodyDirection}. Positions: ${panel.characterPositions}.`,
       `Camera: ${panel.cameraShot}; ${panel.cameraAngle}; screen direction ${panel.cameraDirection}.`,
       `Scene layers: foreground ${panel.foreground}; midground ${panel.midground}; background ${panel.background}.`,
       `Composition: ${panel.composition}. Lighting: ${panel.lighting}. Mood: ${panel.mood}.`,
       `Important props: ${panel.importantProps.join(", ")||"none"}.`,
-      `Continuity entering panel: ${panel.continuityFromPreviousPanel||page.startState}.`,
-      `Continuity leaving panel: ${panel.continuityToNextPanel||page.endState}.`,
+      `Continuity entering panel: ${imageSafeStoryText(panel.continuityFromPreviousPanel||page.startState)}.`,
+      `Continuity leaving panel: ${imageSafeStoryText(panel.continuityToNextPanel||page.endState)}.`,
       plannerNote?`Planner visual note: ${plannerNote}.`:"",
       "Leave a small clean negative-space area near an upper corner ONLY when this panel contains essential visible dialogue or a critical system notification. Otherwise prioritize uncluttered artwork. Do NOT draw speech balloons, system text, captions or any readable text."
     ].filter(Boolean).join("\n");
@@ -119,7 +128,7 @@ export function compileMangaPagePrompt(input:{
     `PAGE FORMAT: portrait 2:3. Page ${page.pageNumber}. EXACTLY ${page.panels.length} panels. Layout preset: ${layout.label} (${page.panelLayout}). Use clean gutters and strong readable panel borders. Do not add, remove, merge, split or reorder panels. Reading order follows panel numbers 1 through ${page.panels.length}.`,
     `MANGA STYLE: ${MANGA_STYLE_PROMPTS[production.stylePreset]}. Keep the entire page visually unified, print-ready and professionally finished.`,
     mangaColorInstruction(production.stylePreset),
-    `PAGE PURPOSE: ${page.pagePurpose}. START STATE: ${page.startState}. END STATE: ${page.endState}. NEXT-PAGE CONTINUITY: ${page.continuityToNextPage}.`,
+    `PAGE PURPOSE: ${imageSafeStoryText(page.pagePurpose)}. START STATE: ${imageSafeStoryText(page.startState)}. END STATE: ${imageSafeStoryText(page.endState)}. NEXT-PAGE CONTINUITY: ${imageSafeStoryText(page.continuityToNextPage)}.`,
     characterBlocks.length?`LOCKED CHARACTER BIBLE:\n${characterBlocks.join("\n")}`:"No recurring character bible is required for this page.",
     locationBlocks.length?`LOCKED LOCATION BIBLE:\n${locationBlocks.join("\n")}`:"",
     `PANEL BLUEPRINT — obey every numbered panel and its exact slot:\n\n${panelBlocks.join("\n\n")}`,
