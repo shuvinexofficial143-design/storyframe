@@ -37,6 +37,29 @@ function cleanSpoken(value:unknown){
   return typeof value==="string"?value.replace(/\s+/g," ").trim():"";
 }
 
+function narrationSafeText(value:string){
+  return value
+    .replace(/\b(?:naked|nude|nudity|undressed|shirtless)\b/gi,"modestly covered")
+    .replace(/\b(?:sex|sexual|intercourse|rape|molest(?:ed|ation)?|assaulted)\b/gi,"sensitive off-screen incident")
+    .replace(/\b(?:blood(?:y|ied|shed)?|gore|gory|mutilat(?:e|ed|ion)|dismember(?:ed|ment))\b/gi,"injury")
+    .replace(/\b(?:kill(?:ed|ing|s)?|murder(?:ed|ing)?|stab(?:bed|bing)?|shoot(?:ing|s|shot)?)\b/gi,"violent conflict")
+    .replace(/\b(?:stained bedsheet|blood-stained sheet)\b/gi,"bedsheet")
+    .replace(/\s+/g," ")
+    .trim();
+}
+
+function safeNarrationPages(pages:Array<z.infer<typeof Page>>){
+  return pages.map((page)=>({
+    pageId:page.id,
+    pageNumber:page.pageNumber,
+    pagePurpose:narrationSafeText(page.pagePurpose),
+    beats:page.beats.map((beat)=>({
+      storyBeat:narrationSafeText(beat.storyBeat),
+      sourceText:narrationSafeText(beat.sourceText)
+    }))
+  }));
+}
+
 function fallbackPageText(page:z.infer<typeof Page>){
   const parts=page.beats.flatMap((beat)=>[cleanSpoken(beat.storyBeat),cleanSpoken(beat.sourceText)]).filter(Boolean);
   return parts.filter((value,index)=>parts.indexOf(value)===index).join(" ").slice(0,2200);
@@ -75,12 +98,10 @@ export async function POST(request:Request){
     const data=parsed.data;
     if(!isStoryAnalysisModel(data.analysisModel))return NextResponse.json({error:"Unsupported narration planning model"},{status:400});
 
-    const pageContext=data.pages.map((page)=>({
-      pageId:page.id,
-      pageNumber:page.pageNumber,
-      pagePurpose:page.pagePurpose,
-      beats:page.beats
-    }));
+    // Narration does not need explicit visual details. Send a narration-safe copy so a
+    // policy-sensitive image/story phrase cannot make Vertex return zero candidates.
+    const pageContext=safeNarrationPages(data.pages);
+    const narrationStory=narrationSafeText(data.story);
 
     const result=await withStoryModelFallback({
       model:data.analysisModel,
@@ -90,8 +111,8 @@ export async function POST(request:Request){
         systemPrompt:"You are StoryFrame's cinematic Hindi story-explainer writer and audio-to-visual editor. Return strict JSON only. Write the narration primarily in FIRST PERSON from the protagonist's point of view when the source supports a clear protagonist, using natural spoken Hindi such as 'मैं', 'मेरे', 'मुझे', 'मेरे पीछे', 'मैं देखता हूँ'. Make it feel like the protagonist is rapidly recounting events as they happen, not like an outside documentary narrator. Use present-tense or immediate-recap phrasing, short punchy clauses, quick cause→effect transitions, concrete actions, reactions, danger, gains/losses, ranks/stats/resources when they matter, and occasional compact thoughts or judgments. The language should be simple, direct, energetic and slightly raw—like a fast-paced fantasy/anime recap voiceover—without copying any source wording. Avoid literary prose, formal exposition, repetitive 'फिर', long moral commentary, or textbook/report tone. Keep third-person only for moments the protagonist cannot know or when the source genuinely changes viewpoint. Preserve actual story facts and chronology; never invent plot events. Then divide the narration into page-aligned segments so each segment describes only what is visible on that supplied page. Every supplied page must appear exactly once, in page-number order.",
         userPrompt:`TITLE: ${data.title}
 
-ORIGINAL STORY:
-${data.story}
+ORIGINAL STORY (narration-safe wording):
+${narrationStory}
 
 GENERATED VISUAL PAGES:
 ${JSON.stringify(pageContext)}
