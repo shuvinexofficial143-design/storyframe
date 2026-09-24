@@ -74,7 +74,8 @@ export function requestQueuedMangaImage<T>(input:{
       if(response.ok)return payload as T;
 
       lastError=errorMessage(payload,response.status);
-      const retryable=response.status===429||response.status===500||response.status===502||response.status===503||response.status===504;
+      const policyBlocked=/PROHIBITED_CONTENT|blockReason["']?\s*:\s*["']?(?:PROHIBITED_CONTENT|SAFETY)/i.test(lastError);
+      const retryable=!policyBlocked&&(response.status===429||response.status===500||response.status===502||response.status===503||response.status===504);
       if(!retryable||attempt>=IMAGE_QUOTA_BACKOFF_MS.length)throw new Error(lastError);
 
       const waitMs=retryDelay(payload,attempt);
