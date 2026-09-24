@@ -15,6 +15,7 @@ const providers:Record<string,ImageProvider>={
 const MAX_EMBEDDED_IMAGE_BYTES=220_000;
 const MAX_EMBEDDED_EDGE=1024;
 const GEMINI_IMAGE_RETRY_DELAYS_MS=[2_000,5_000] as const;
+const GEMINI_QUOTA_FALLBACK_MODEL="gemini-3.1-flash-lite-image";
 
 export function getImageProvider(id="gemini"){
   return providers[id]||geminiImageProvider;
@@ -165,8 +166,30 @@ export async function generateImageWithFallback(input:ImageGenerationInput):Prom
   try{
     return await executePreferredWithRetry(desired,input);
   }catch(error){
-    if(input.allowFallback===false)throw error;
     const primaryError=error instanceof Error?error.message:"Primary provider failed";
+
+    // Standard PayGo can temporarily return RESOURCE_EXHAUSTED for one Gemini
+    // image model even while another Gemini image pool is available. Keep
+    // continuity/reference support by failing over inside Gemini before ever
+    // considering the text-only public fallback.
+    const requestedModel=input.model||desired.defaultModel;
+    if(desired.id==="gemini"&&isRetryableImageProviderFailure(error)&&requestedModel!==GEMINI_QUOTA_FALLBACK_MODEL){
+      try{
+        const geminiFallback=await executeProvider(desired,{...input,model:GEMINI_QUOTA_FALLBACK_MODEL,retryProvider:false});
+        return {
+          ...geminiFallback,
+          fallbackUsed:true,
+          primaryError,
+          warning:`Primary Gemini image capacity was temporarily unavailable, so StoryFrame used ${GEMINI_QUOTA_FALLBACK_MODEL} while preserving Gemini reference-image continuity. ${primaryError}`
+        };
+      }catch(geminiFallbackError){
+        if(input.allowFallback===false)throw geminiFallbackError;
+      }
+    }else if(input.allowFallback===false){
+      throw error;
+    }
+
+    if(input.allowFallback===false)throw error;
     const fallback=await executeProvider(pollinationsImageProvider,{...input,model:pollinationsImageProvider.defaultModel,referenceImages:[]});
     return {...fallback,fallbackUsed:true,primaryError,warning:`${desired.name} primary generation was unavailable after retrying, so StoryFrame used Pollinations flux-anime fallback. ${primaryError}`};
   }
