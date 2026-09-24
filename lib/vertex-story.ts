@@ -49,11 +49,12 @@ function endpoint(model:string){
   return `https://${host}/v1/projects/${encodeURIComponent(projectId())}/locations/${encodeURIComponent(region)}/publishers/google/models/${encodeURIComponent(model)}:generateContent`;
 }
 
-async function fetchWithTimeout(url:string,init:RequestInit){
+async function fetchWithTimeout(url:string,init:RequestInit,overrideTimeoutMs?:number){
+  const effectiveTimeout=overrideTimeoutMs&&overrideTimeoutMs>0?overrideTimeoutMs:timeoutMs();
   const controller=new AbortController();
-  const timer=setTimeout(()=>controller.abort(),timeoutMs());
+  const timer=setTimeout(()=>controller.abort(),effectiveTimeout);
   try{return await fetch(url,{...init,signal:controller.signal})}
-  catch(error){if(error instanceof Error&&error.name==="AbortError")throw new Error(`Vertex Gemini story analysis timed out after ${Math.round(timeoutMs()/1000)} seconds.`);throw error}
+  catch(error){if(error instanceof Error&&error.name==="AbortError")throw new Error(`Vertex Gemini story analysis timed out after ${Math.round(effectiveTimeout/1000)} seconds.`);throw error}
   finally{clearTimeout(timer)}
 }
 
@@ -137,7 +138,7 @@ export function parseVertexJsonObject(value:string){
 
 export function hasVertexStoryAnalysis(){return Boolean(projectId()&&(parseServiceAccount()||apiKey()))}
 
-async function requestOnce(input:VertexCompletionInput,userPrompt:string,maxOutputTokens:number,thinkingLevel:"HIGH"|"MEDIUM"){
+async function requestOnce(input:VertexCompletionInput,userPrompt:string,maxOutputTokens:number,thinkingLevel:"HIGH"|"MEDIUM",requestTimeoutMs?:number){
   const project=projectId();
   const account=parseServiceAccount();
   const key=apiKey();
@@ -160,7 +161,7 @@ async function requestOnce(input:VertexCompletionInput,userPrompt:string,maxOutp
     }
   };
 
-  const response=await fetchWithTimeout(url.toString(),{method:"POST",headers,body:JSON.stringify(body),cache:"no-store"});
+  const response=await fetchWithTimeout(url.toString(),{method:"POST",headers,body:JSON.stringify(body),cache:"no-store"},requestTimeoutMs);
   const raw=await response.text();
   if(!response.ok){
     let message=raw.replace(/\s+/g," ").slice(0,700);
@@ -181,8 +182,9 @@ export async function vertexStoryJsonCompletion(input:VertexCompletionInput){
   const pageLike=/Page Planner|Beat Director|Long-Story Director/i.test(input.systemPrompt);
   const firstThinking=pageLike?"MEDIUM" as const:"HIGH" as const;
   const requested=input.maxTokens??14000;
-  const firstBudget=Math.max(requested,32768);
-  const first=await requestOnce(input,input.userPrompt,firstBudget,firstThinking);
+  const firstBudget=pageLike?Math.max(8_000,requested):Math.max(requested,32768);
+  const requestTimeout=pageLike?65_000:undefined;
+  const first=await requestOnce(input,input.userPrompt,firstBudget,firstThinking,requestTimeout);
 
   if(first.text&&first.finishReason!=="MAX_TOKENS"){
     try{return {text:first.text,json:parseVertexJsonObject(first.text)}}catch(error){
@@ -193,7 +195,7 @@ export async function vertexStoryJsonCompletion(input:VertexCompletionInput){
   const recoveryReason=!first.text?"empty_response":(first.finishReason||"parse_error");
   console.warn("Vertex Gemini returned empty, truncated or malformed structured output; retrying immediately with full output budget and MEDIUM thinking.",{finishReason:recoveryReason});
   const retryPrompt=`${input.userPrompt}\n\nSTRICT JSON RECOVERY RETRY: Return exactly ONE COMPLETE valid JSON object and nothing else. Do not use markdown fences. Preserve every requested story beat and its order. Keep descriptions concise enough to finish the entire object. Escape quotes and line breaks inside strings. Do not use trailing commas. Close every array and object. Never stop mid-JSON. IMPORTANT: produce the final JSON response directly; do not spend the response budget on hidden reasoning.`;
-  const retry=await requestOnce({...input,temperature:Math.min(input.temperature??0.12,0.03)},retryPrompt,GEMINI_31_PRO_MAX_OUTPUT_TOKENS,"MEDIUM");
+  const retry=await requestOnce({...input,temperature:Math.min(input.temperature??0.12,0.03)},retryPrompt,pageLike?Math.max(12_000,requested):GEMINI_31_PRO_MAX_OUTPUT_TOKENS,"MEDIUM",requestTimeout);
   if(!retry.text){
     throw new Error(`Vertex Gemini returned an empty story analysis response twice (finish reason: ${retry.finishReason||"unknown"}). Please retry; StoryFrame already performed an immediate full-budget recovery attempt.`);
   }

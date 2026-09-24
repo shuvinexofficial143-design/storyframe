@@ -321,17 +321,28 @@ export function MangaPageProductionStudio(){
 
   const isRecoverablePlannerOrderError=(error:unknown)=>error instanceof Error&&/(duplicated a story beat|skipped or reordered beats|unknown beat ID|made no progress)/i.test(error.message);
 
+  const isRecoverablePlanningTransportError=(error:unknown)=>{
+    if(error instanceof TypeError&&/failed to fetch|network|load failed/i.test(error.message))return true;
+    if(!(error instanceof Error))return false;
+    return /failed to fetch|network|load failed|timed out|timeout|\b502\b|\b503\b|\b504\b|temporar(?:y|ily) unavailable/i.test(error.message);
+  };
+
   const requestPageChunkWithAutoRetry=async(currentProject:MangaProject,currentProduction:MangaChapterProduction,startBeatIndex:number,pageStartNumber:number,signal?:AbortSignal)=>{
     let lastError:unknown;
-    const maxAttempts=3;
+    const maxAttempts=4;
     for(let attempt=1;attempt<=maxAttempts;attempt+=1){
       try{
         return await requestPageChunk(currentProject,currentProduction,startBeatIndex,pageStartNumber,signal);
       }catch(error){
         lastError=error;
-        if(!isRecoverablePlannerOrderError(error)||attempt===maxAttempts)throw error;
-        setProgress(`Page ${pageStartNumber} planner returned inconsistent beat order. Auto-retrying ${attempt+1}/${maxAttempts}…`);
-        await waitCancelable(1200*attempt,signal);
+        const semantic=isRecoverablePlannerOrderError(error);
+        const transport=isRecoverablePlanningTransportError(error);
+        if((!semantic&&!transport)||attempt===maxAttempts)throw error;
+        const delay=transport?Math.min(12_000,2_500*attempt):1200*attempt;
+        setProgress(transport
+          ?`Page ${pageStartNumber} planning connection dropped. Saved coverage is safe; auto-retrying ${attempt+1}/${maxAttempts}…`
+          :`Page ${pageStartNumber} planner returned inconsistent beat order. Auto-retrying ${attempt+1}/${maxAttempts}…`);
+        await waitCancelable(delay,signal);
       }
     }
     throw lastError instanceof Error?lastError:new Error("Manga page planner retry failed.");
