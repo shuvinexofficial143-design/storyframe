@@ -30,6 +30,14 @@ function imageSafeStoryText(value:string){
     .trim();
 }
 
+function imageSafeStoryText(value:string){
+  return value
+    .replace(/\b(?:gore|gory|blood(?:y|ied|shed)?|mutilat(?:e|ed|ion)|dismember(?:ed|ment)?|decapitat(?:e|ed|ion)|disembowel(?:ed|ment)?|corpse|dead body|suicide|self[- ]harm|tortur(?:e|ed|ing)|rape|sexual assault|explicit sex|nude|naked)\b/gi,"non-graphic obscured detail")
+    .replace(/\b(?:stab(?:bed|bing)?|shoot(?:ing|s|shot)?|kill(?:ed|ing|s)?|murder(?:ed|ing|s)?)\b/gi,"off-screen dangerous confrontation")
+    .replace(/\s{2,}/g," ")
+    .trim();
+}
+
 function styleSafePlannerNote(note:string,blackAndWhite:boolean){
   if(!note)return "";
   if(blackAndWhite)return note;
@@ -110,7 +118,7 @@ export function compileMangaPagePrompt(input:{
       `Important props: ${panel.importantProps.join(", ")||"none"}.`,
       `Continuity entering panel: ${imageSafeStoryText(panel.continuityFromPreviousPanel||page.startState)}.`,
       `Continuity leaving panel: ${imageSafeStoryText(panel.continuityToNextPanel||page.endState)}.`,
-      plannerNote?`Planner visual note: ${plannerNote}.`:"",
+      plannerNote?`Planner visual note: ${imageSafeStoryText(plannerNote)}.`:"",
       "Leave a small clean negative-space area near an upper corner ONLY when this panel contains essential visible dialogue or a critical system notification. Otherwise prioritize uncluttered artwork. Do NOT draw speech balloons, system text, captions or any readable text."
     ].filter(Boolean).join("\n");
   });
@@ -134,7 +142,7 @@ export function compileMangaPagePrompt(input:{
     `PANEL BLUEPRINT — obey every numbered panel and its exact slot:\n\n${panelBlocks.join("\n\n")}`,
     strict?"STRICT CONTINUITY ACROSS THE WHOLE PAGE: the same recurring person must have the same face, hair, age, proportions and costume in every panel. Continue physical positions, held objects, injuries, wet/dirty clothing, architecture, recurring colors and screen direction from one panel to the next. Do not teleport or redesign anything unless the supplied story beat explicitly changes it.":"Maintain clear character, prop, location, color and screen-direction continuity across all panels.",
     previousPage?`PREVIOUS PAGE/CHAPTER CONTINUITY: ${previousPage.endState}. The supplied previous-page image, when present, is an authoritative visual continuity reference for character identity, costume, environment design and palette; continue those facts without copying its exact composition.`:"This is the first page with no prior rendered page reference; establish identities clearly from the locked bibles.",
-    "TEXT-FREE ART ONLY: absolutely no dialogue lettering, captions, narration text, speech balloons, thought balloons, readable signs, page title, panel numbers, logos, watermarks or UI. StoryFrame will overlay ONLY short essential dialogue, critical system notifications and rare action SFX after generation. Long explanations belong in narration audio, not on the manga art."
+    "TEXT-FREE ART ONLY: absolutely no dialogue lettering, captions, narration text, speech balloons, thought balloons, readable signs, page title, panel numbers, logos, watermarks or UI. StoryFrame will overlay ONLY short essential dialogue, critical system notifications and rare action SFX after generation. Long explanations belong in narration audio, not on the manga art.",\n    "SAFETY STAGING: keep all imagery non-graphic. If a story beat implies sensitive, violent, sexual, or disturbing detail, preserve only the narrative reaction and composition; conceal the sensitive area with foreground occlusion, shadow, depth-of-field blur, silhouette, cropped framing, or an off-screen implication. Never depict explicit detail."
   ].filter(Boolean).join("\n\n");
 
   const negative=[
