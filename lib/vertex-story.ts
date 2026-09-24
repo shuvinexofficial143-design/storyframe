@@ -170,7 +170,6 @@ async function requestOnce(input:VertexCompletionInput,userPrompt:string,maxOutp
   let payload:VertexPayload;
   try{payload=JSON.parse(raw) as VertexPayload}catch{throw new Error("Vertex Gemini returned an invalid API response.")}
   const text=responseText(payload);
-  if(!text)throw new Error("Vertex Gemini returned an empty story analysis response.");
   return {text,finishReason:payload.candidates?.[0]?.finishReason||""};
 }
 
@@ -185,15 +184,19 @@ export async function vertexStoryJsonCompletion(input:VertexCompletionInput){
   const firstBudget=Math.max(requested,32768);
   const first=await requestOnce(input,input.userPrompt,firstBudget,firstThinking);
 
-  if(first.finishReason!=="MAX_TOKENS"){
+  if(first.text&&first.finishReason!=="MAX_TOKENS"){
     try{return {text:first.text,json:parseVertexJsonObject(first.text)}}catch(error){
       if(!(error instanceof Error)||!error.message.includes("malformed JSON"))throw error;
     }
   }
 
-  console.warn("Vertex Gemini returned truncated or malformed structured output; retrying with full output budget.",{finishReason:first.finishReason||"parse_error"});
-  const retryPrompt=`${input.userPrompt}\n\nSTRICT JSON RECOVERY RETRY: Return exactly ONE COMPLETE valid JSON object and nothing else. Do not use markdown fences. Preserve every requested story beat and its order. Keep descriptions concise enough to finish the entire object. Escape quotes and line breaks inside strings. Do not use trailing commas. Close every array and object. Never stop mid-JSON.`;
+  const recoveryReason=!first.text?"empty_response":(first.finishReason||"parse_error");
+  console.warn("Vertex Gemini returned empty, truncated or malformed structured output; retrying immediately with full output budget and MEDIUM thinking.",{finishReason:recoveryReason});
+  const retryPrompt=`${input.userPrompt}\n\nSTRICT JSON RECOVERY RETRY: Return exactly ONE COMPLETE valid JSON object and nothing else. Do not use markdown fences. Preserve every requested story beat and its order. Keep descriptions concise enough to finish the entire object. Escape quotes and line breaks inside strings. Do not use trailing commas. Close every array and object. Never stop mid-JSON. IMPORTANT: produce the final JSON response directly; do not spend the response budget on hidden reasoning.`;
   const retry=await requestOnce({...input,temperature:Math.min(input.temperature??0.12,0.03)},retryPrompt,GEMINI_31_PRO_MAX_OUTPUT_TOKENS,"MEDIUM");
+  if(!retry.text){
+    throw new Error(`Vertex Gemini returned an empty story analysis response twice (finish reason: ${retry.finishReason||"unknown"}). Please retry; StoryFrame already performed an immediate full-budget recovery attempt.`);
+  }
   if(retry.finishReason==="MAX_TOKENS")throw new Error("Vertex Gemini structured output exceeded the full 65K output budget. StoryFrame should split this planning step into smaller chunks.");
   return {text:retry.text,json:parseVertexJsonObject(retry.text)};
 }
