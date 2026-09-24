@@ -10,7 +10,8 @@ import {calculatePlannedCoverage} from "@/lib/manga-production/validators";
 import {deriveSeed} from "@/lib/continuity/seed";
 import {storyAnalysisProviderLabel,type StoryAnalysisModel} from "@/lib/story-analysis-models";
 import {withStoryModelFallback} from "@/lib/story-model-fallback";
-import type {MangaChapterProduction,MangaMasterAnalysis,MangaPage,MangaPacingPreset,MangaStylePreset} from "@/lib/manga-production/types";
+import type {MangaChapterProduction,MangaMasterAnalysis,MangaPage,MangaStylePreset} from "@/lib/manga-production/types";
+import type {MangaPacingPreset} from "@/lib/manga-production/pacing-policy";
 
 export const maxDuration=300;
 
