@@ -18,8 +18,55 @@ const Input=z.object({
   analysisModel:z.string(),
   pages:z.array(Page).min(1).max(250)
 });
-const Segment=z.object({pageId:z.string().min(1),pageNumber:z.number().int().min(1),text:z.string().min(20)});
-const Output=z.object({explainer:z.string().min(40),segments:z.array(Segment).min(1)});
+const LooseSegment=z.object({
+  pageId:z.string().optional(),
+  sceneId:z.string().optional(),
+  pageNumber:z.coerce.number().int().min(1).optional(),
+  text:z.string().optional(),
+  narration:z.string().optional(),
+  script:z.string().optional()
+}).passthrough();
+const LooseOutput=z.object({
+  explainer:z.string().optional(),
+  narration:z.string().optional(),
+  script:z.string().optional(),
+  segments:z.array(LooseSegment).optional()
+}).passthrough();
+
+function cleanSpoken(value:unknown){
+  return typeof value==="string"?value.replace(/\s+/g," ").trim():"";
+}
+
+function fallbackPageText(page:z.infer<typeof Page>){
+  const parts=page.beats.flatMap((beat)=>[cleanSpoken(beat.storyBeat),cleanSpoken(beat.sourceText)]).filter(Boolean);
+  return parts.filter((value,index)=>parts.indexOf(value)===index).join(" ").slice(0,2200);
+}
+
+function normalizeNarration(raw:unknown,pages:Array<z.infer<typeof Page>>){
+  const parsed=LooseOutput.safeParse(raw);
+  const data=parsed.success?parsed.data:{};
+  const returned=Array.isArray(data.segments)?data.segments:[];
+  const byId=new Map<string,string>();
+  const byNumber=new Map<number,string>();
+
+  for(const item of returned){
+    const spoken=cleanSpoken(item.text)||cleanSpoken(item.narration)||cleanSpoken(item.script);
+    if(!spoken)continue;
+    const id=cleanSpoken(item.pageId)||cleanSpoken(item.sceneId);
+    if(id)byId.set(id,spoken);
+    if(item.pageNumber)byNumber.set(item.pageNumber,spoken);
+  }
+
+  const segments=pages.map((page)=>({
+    pageId:page.id,
+    pageNumber:page.pageNumber,
+    text:byId.get(page.id)||byNumber.get(page.pageNumber)||fallbackPageText(page)
+  }));
+
+  const explicit=cleanSpoken(data.explainer)||cleanSpoken(data.narration)||cleanSpoken(data.script);
+  const explainer=explicit||segments.map((item)=>item.text).filter(Boolean).join(" ");
+  return {explainer,segments};
+}
 
 export async function POST(request:Request){
   try{
@@ -70,13 +117,16 @@ Rules:
       })
     });
 
-    const checked=Output.safeParse(result.data.json);
-    if(!checked.success)throw new Error("Narration planner returned incomplete structured data.");
-    const expected=data.pages.map((p)=>p.id);
-    const actual=checked.data.segments.map((s)=>s.pageId);
-    if(actual.length!==expected.length||actual.some((id,index)=>id!==expected[index]))throw new Error("Narration planner did not preserve the exact visual page order.");
+    const normalized=normalizeNarration(result.data.json,data.pages);
+    if(!normalized.explainer||normalized.explainer.length<20)throw new Error("Narration planner returned no usable spoken narration.");
+    const unusable=normalized.segments.find((segment)=>segment.text.length<8);
+    if(unusable)throw new Error(`Narration planner could not create usable narration for visual page ${unusable.pageNumber}.`);
 
-    return NextResponse.json({kind:"narration-plan",data:checked.data});
+    return NextResponse.json({
+      kind:"narration-plan",
+      data:normalized,
+      repaired:true
+    });
   }catch(error){
     console.error("Narration planning failed",error);
     return NextResponse.json({error:error instanceof Error?error.message:"Narration planning failed"},{status:502});
