@@ -29,7 +29,6 @@ function mutateProject(state:MangaStudioState,projectId:string,updater:(project:
 
 type ImageResponse={imageDataUrl:string;sourceUrl?:string;model:string;provider:string;seed:number;warning?:string;fallbackUsed?:boolean};
 type ReferenceResponse={imageDataUrl:string;sourceUrl:string;model:string;provider:string;seed:number;warning?:string};
-type BackgroundImageResult={pages:Array<{pageId:string;pageNumber:number;imageDataUrl:string;sourceUrl:string;model:string;provider:string;seed:number}>;references:Array<{name:string;imageDataUrl:string;sourceUrl:string;model:string;provider:string;seed:number}>};
 type MasterResponse={kind:"master";data:MangaMasterAnalysis};
 type PagesResponse={kind:"pages";data:MangaPagePlan};
 type Tab="story"|"characters"|"locations"|"script"|"pages"|"narration"|"export"|"download";
@@ -231,12 +230,10 @@ export function MangaPageProductionStudio(){
     if(!hydrated)return;
     let runId="";
     try{runId=localStorage.getItem(`storyframe-manga-background-run:${project.id}:${chapter.id}`)||""}catch{}
-    let imageRunId="";try{imageRunId=localStorage.getItem(`storyframe-manga-background-images:${project.id}:${chapter.id}`)||""}catch{}
-    if((!runId&&!imageRunId)||busyRef.current)return;
+    if(!runId||busyRef.current)return;
     const controller=beginCancelableTask();
     setError("");setNotice("Reconnected to the background manga job.");
-    const resume=imageRunId?pollBackgroundImageRun(imageRunId,project.id,chapter.id,controller.signal):pollBackgroundRun(runId,controller.signal);
-    void resume.catch((reason)=>{
+    void pollBackgroundRun(runId,controller.signal).catch((reason)=>{
       if(!isAbortError(reason))setError(reason instanceof Error?reason.message:"Could not reconnect to background manga job.");
     }).finally(()=>{finishCancelableTask(controller);setBusy("");setProgress("")});
     return()=>controller.abort();
@@ -554,84 +551,33 @@ export function MangaPageProductionStudio(){
     }
   };
 
-  const backgroundImageStorageKey=(projectId:string,chapterId:string)=>`storyframe-manga-background-images:${projectId}:${chapterId}`;
-
-  const applyBackgroundImages=async(runId:string,projectId:string,chapterId:string,result:BackgroundImageResult,signal?:AbortSignal)=>{
-    const snapshot=stateRef.current;
-    const targetProject=snapshot.projects.find((item)=>item.id===projectId);
-    const targetChapter=targetProject?.chapters.find((item)=>item.id===chapterId);
-    if(!targetProject||!targetChapter?.manga)throw new Error("Local manga project is unavailable while syncing background images.");
-
-    let nextProject={...targetProject,characters:targetProject.characters.map((character)=>{
-      const ref=result.references.find((item)=>normalizeName(item.name)===normalizeName(character.name));
-      if(!ref||character.manualReferenceImage||character.referenceImages.length)return character;
-      return {...character,manualReferenceImage:ref.imageDataUrl,referenceImages:[...character.referenceImages,{type:"primary" as const,url:ref.sourceUrl||ref.imageDataUrl,seed:ref.seed,provider:ref.provider,createdAt:now()}],updatedAt:now()};
-    }),updatedAt:now()};
-    applyState((value)=>mutateProject(value,projectId,()=>nextProject));
-
-    const ordered=[...result.pages].sort((a,b)=>a.pageNumber-b.pageNumber);
-    for(const item of ordered){
-      if(signal?.aborted)throw new DOMException("Cancelled","AbortError");
-      const live=stateRef.current.projects.find((p)=>p.id===projectId);
-      const liveChapter=live?.chapters.find((ch)=>ch.id===chapterId);
-      const page=liveChapter?.manga?.pages.find((pg)=>pg.id===item.pageId);
-      if(!live||!liveChapter?.manga||!page||page.composedImageDataUrl)continue;
-      const pageForCompose={...page,rawPageImageDataUrl:item.imageDataUrl,renderProvider:item.provider,renderModel:item.model,renderSeed:item.seed,status:"generated" as const};
-      setProgress(`Background images finished. Adding dialogue/SFX to Page ${item.pageNumber} locally…`);
-      const composed=await composeGeneratedMangaPage(item.imageDataUrl,pageForCompose,liveChapter.manga.stylePreset);
-      applyState((current)=>mutateProject(current,projectId,(p)=>({...p,chapters:p.chapters.map((ch)=>ch.id===chapterId&&ch.manga?{...ch,manga:{...ch.manga,pages:ch.manga.pages.map((pg)=>pg.id===item.pageId?{...pg,...pageForCompose,composedImageDataUrl:composed,status:"composed",error:undefined}:pg),updatedAt:now()},updatedAt:now()}:ch),updatedAt:now()})));
-    }
-    try{localStorage.removeItem(backgroundImageStorageKey(projectId,chapterId))}catch{}
-    backgroundRunRef.current=null;
-    void fetch(`/api/manga/background-build/${runId}?cleanup=1`,{method:"DELETE"}).catch(()=>undefined);
-    setTab("pages");
-    setNotice(`Background generation complete. ${result.pages.length} page image(s) were generated server-side; finished pages were synced into this project.`);
-  };
-
-  const pollBackgroundImageRun=async(runId:string,projectId:string,chapterId:string,signal?:AbortSignal)=>{
-    backgroundRunRef.current=runId;setBusy("all-pages");
-    while(!signal?.aborted){
-      const response=await fetch(`/api/manga/background-build/${runId}`,{cache:"no-store",signal});
-      const data=await parseJsonResponse<{status:string;progress:string;error?:string;result?:BackgroundImageResult}>(response);
-      setProgress(data.progress||"Background image generation is running…");
-      if(data.status==="completed"&&data.result){await applyBackgroundImages(runId,projectId,chapterId,data.result,signal);return}
-      if(data.status==="failed")throw new Error(data.error||"Background image generation failed.");
-      if(data.status==="cancelled"){setNotice("Background image generation cancelled. Already generated pages were kept on the server until cleanup.");return}
-      await waitCancelable(4000,signal);
-    }
-  };
-
   const generateAllPages=async()=>{
     const currentProduction=chapter.manga;
     if(!currentProduction?.pages.length)return;
     const orderedPages=[...currentProduction.pages].sort((a,b)=>a.pageNumber-b.pageNumber);
-    const pending=orderedPages.filter((page)=>!page.composedImageDataUrl);
-    if(!pending.length){setNotice("All manga pages are already generated.");return}
-
-    const tasks=pending.map((page)=>{
-      const pageIndex=currentProduction.pages.findIndex((item)=>item.id===page.id);
-      const previousPage=pageIndex>0?currentProduction.pages[pageIndex-1]:getPreviousRenderedMangaPage(project,chapter.id);
-      const compiled=compileMangaPagePrompt({project,production:currentProduction,page,previousPage,stronger:false});
-      const names=[...new Set(page.panels.flatMap((panel)=>panel.characters))];
-      const missingReferences=names.map((name)=>project.characters.find((character)=>normalizeName(character.name)===normalizeName(name)))
-        .filter((character):character is CharacterReference=>Boolean(character&&!character.manualReferenceImage&&!character.referenceImages.length))
-        .slice(0,4).map((character)=>({name:character.name,referencePrompt:character.referencePrompt,seed:character.seedBase}));
-      return {pageId:page.id,pageNumber:page.pageNumber,prompt:compiled.prompt,negativePrompt:compiled.negativePrompt,seed:deriveSeed(project.visualBible.masterSeed,page.id,0),referenceImages:compiled.referenceImages,missingReferences};
-    });
-
+    const initialPending=orderedPages.filter((page)=>!page.composedImageDataUrl).length;
+    if(!initialPending){setNotice("All manga pages are already generated.");return}
     const controller=beginCancelableTask();
-    setBusy("all-pages");setError("");setNotice("");setProgress(`Sending ${tasks.length} unfinished page(s) to durable background generation…`);
+    setBusy("all-pages");setError("");setNotice("");
+    let completed=0;
     try{
-      const response=await fetch("/api/manga/background-images",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({projectId:project.id,chapterId:chapter.id,pages:tasks}),signal:controller.signal});
-      const started=await parseJsonResponse<{runId:string;status:string;progress:string}>(response);
-      backgroundRunRef.current=started.runId;
-      try{localStorage.setItem(backgroundImageStorageKey(project.id,chapter.id),started.runId)}catch{}
-      setProgress(started.progress||"Background image generation queued…");
-      await pollBackgroundImageRun(started.runId,project.id,chapter.id,controller.signal);
+      for(const plannedPage of orderedPages){
+        const existing=locatePage(plannedPage.id);
+        if(existing?.page.composedImageDataUrl)continue;
+        setProgress(`Strict sequential render ${completed+1}/${initialPending}: Page ${plannedPage.pageNumber}. Gemini quota recovery is handled by the image queue before this page can fail.`);
+        await renderPage(plannedPage.id,false,controller.signal);
+        const verified=locatePage(plannedPage.id);
+        if(!verified?.page.composedImageDataUrl||verified.page.status!=="composed")throw new Error(`Page ${plannedPage.pageNumber} was not fully composed.`);
+        completed+=1;
+      }
+      setNotice(`${completed} remaining manga pages generated in strict order. No later page starts until the current page is fully saved and composed.`);
     }catch(reason){
-      if(isAbortError(reason))setNotice("Browser monitoring stopped. The server image job can continue; reopen this chapter to reconnect.");
-      else setError(reason instanceof Error?reason.message:"Could not start durable background image generation.");
-    }finally{finishCancelableTask(controller);setBusy("");setProgress("")}
+      if(isAbortError(reason))setNotice("Generate All Pages cancelled. Finished pages were kept; run it again to resume from the first unfinished page.");
+      else setError(reason instanceof Error?reason.message:"Chapter page generation stopped at the first unfinished page. Run Generate All Pages again to resume there.");
+    }finally{
+      finishCancelableTask(controller);
+      setBusy("");setProgress("");
+    }
   };
 
   const finishStoryGeneratorCommand=(ok:boolean,message:string)=>{
