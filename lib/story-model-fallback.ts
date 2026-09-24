@@ -5,7 +5,7 @@ export const VERTEX_STORY_RETRY_DELAYS_MS=[6_000,12_000,24_000] as const;
 export function isRetryableVertexStoryFailure(error:unknown){
   if(!(error instanceof Error))return false;
   const message=error.message.toLowerCase();
-  return /\b429\b|resource exhausted|quota|rate limit|too many requests|temporar(?:y|ily) unavailable|\b50[0234]\b|timed out|timeout|malformed json|empty story analysis response|full 65k output budget/.test(message);
+  return /\b429\b|resource exhausted|quota|rate limit|too many requests|temporar(?:y|ily) unavailable|\b50[0234]\b|timed out|timeout|malformed json|empty story analysis response|no visible story json|empty_response|candidates:\s*0|full 65k output budget/.test(message);
 }
 
 export function isVertexRateLimitFailure(error:unknown){
