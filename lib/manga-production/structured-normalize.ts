@@ -32,7 +32,7 @@ const TEXT_FIELDS=new Set([
   "defaultOutfit","currentOutfit","consistencyNotes","architecture","lighting","timeOfDay","continuityNotes","appearance","currentOwner","currentLocation","condition",
   "sourceText","event","storyBeat","locationName","action","reaction","stateAfter","characterName","characterId","position","bodyDirection","pose","expression",
   "speaker","text","emotion","pagePurpose","startState","panelLayout","location","characterPositions","cameraShot","cameraAngle","cameraDirection","foreground","midground","background","composition","mood",
-  "continuityFromPreviousPanel","continuityToNextPanel","imagePrompt","negativePrompt","continuityToNextPage","previousPageEndState","chunkEndState"
+  "continuityFromPreviousPanel","continuityToNextPanel","imagePrompt","negativePrompt","continuityToNextPage","previousPageEndState","chunkEndState","chunkSummary"
 ]);
 
 const STRING_ARRAY_FIELDS=new Set([
@@ -111,7 +111,8 @@ function normalizeEnum(value:unknown,allowed:Set<string>,fallback:string):string
 }
 
 function looksLikeMasterRoot(source:Record<string,unknown>):boolean{
-  return "storySummary" in source&&( "timeline" in source||"beats" in source||"locations" in source||"props" in source||"initialCharacterStates" in source);
+  const hasSummary="storySummary" in source||"chunkSummary" in source;
+  return hasSummary&&("timeline" in source||"beats" in source||"locations" in source||"props" in source||"initialCharacterStates" in source);
 }
 
 function looksLikeContinuityState(source:Record<string,unknown>):boolean{
