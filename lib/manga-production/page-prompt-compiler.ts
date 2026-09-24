@@ -103,6 +103,20 @@ export function compileMangaPagePrompt(input:{
   const panelBlocks=page.panels.map((panel,index)=>{
     const slot=layout.slots[index]||layout.slots.at(-1)!;
     const box=`left ${Math.round(slot.x*100)}%, top ${Math.round(slot.y*100)}%, width ${Math.round(slot.width*100)}%, height ${Math.round(slot.height*100)}%`;
+    const panelSafetySource=[panel.storyBeat,panel.sourceText,panel.action,panel.pose,panel.expression,panel.imagePrompt,Object.values(panel.characterStates).flatMap((state)=>state.injuries).join(" ")].join(" ");
+    const sensitivePanel=/\b(?:gore|gory|blood(?:y|ied|shed)?|mutilat|dismember|decapitat|disembowel|corpse|dead body|suicide|self[- ]harm|tortur|rape|sexual assault|explicit sex|nude|naked|stab|shoot|kill|murder)\b/i.test(panelSafetySource);
+    if(sensitivePanel){
+      return [
+        `PANEL ${panel.panelNumber} — EXACT SLOT ${box}.`,
+        "SAFETY REPLACEMENT PANEL: do not depict the sensitive event or its explicit details.",
+        `Visible characters: ${panel.characters.join(", ")||"none"}.`,
+        `Location: ${panel.location||"same established location"}.`,
+        "Replace the blocked moment with a non-graphic continuity bridge: character reaction, environment cutaway, silhouette, obscured foreground, cropped framing, or soft depth-of-field blur.",
+        `Camera continuity: ${panel.cameraShot}; ${panel.cameraAngle}; screen direction ${panel.cameraDirection}.`,
+        `Lighting and mood: ${panel.lighting}; ${panel.mood}.`,
+        "No readable text, speech balloon, caption, system text, graphic injury, nudity, or explicit sensitive detail."
+      ].join("\n");
+    }
     const stateLines=Object.entries(panel.characterStates).map(([name,state])=>`${name}: location ${state.currentLocation}; position ${state.position}; direction ${state.bodyDirection}; pose ${state.pose}; expression ${state.expression}; outfit ${state.currentOutfit}; held ${state.heldObjects.join(", ")||"nothing"}; injuries ${state.injuries.join(", ")||"none"}; wet=${state.wetClothes}; dirty=${state.dirtyClothes}`).join(" | ");
     const plannerNote=styleSafePlannerNote(panel.imagePrompt,blackAndWhite);
     return [
