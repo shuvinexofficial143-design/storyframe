@@ -4,7 +4,7 @@ import {z} from "zod";
 import {MANGA_PACING_PRESETS} from "@/lib/manga-production/pacing-policy";
 import {MANGA_STYLE_PRESETS} from "@/lib/manga-production/types";
 import {STORY_ANALYSIS_MODELS} from "@/lib/story-analysis-models";
-import {backgroundRedisConfigured,putBackgroundJob,type BackgroundJob} from "@/lib/background-job-store";
+import {backgroundJobStoreConfigured,putBackgroundJob,type BackgroundJob} from "@/lib/background-job-store";
 import {backgroundQStashConfigured,publishBackgroundStep} from "@/lib/background-qstash";
 
 export const maxDuration=30;
@@ -30,8 +30,8 @@ export async function POST(request:Request){
   try{
     const parsed=Input.safeParse(await request.json());
     if(!parsed.success)return NextResponse.json({error:"Invalid background manga request",details:parsed.error.flatten()},{status:400});
-    if(!backgroundRedisConfigured()||!backgroundQStashConfigured()){
-      return NextResponse.json({error:"Background mode is not configured yet. Add Upstash Redis REST credentials and QSTASH_TOKEN in Vercel."},{status:503});
+    if(!backgroundJobStoreConfigured()||!backgroundQStashConfigured()){
+      return NextResponse.json({error:"Background mode is not configured yet. Add MONGODB_URI and QSTASH_TOKEN in Vercel."},{status:503});
     }
     const id=randomUUID();
     const now=new Date().toISOString();

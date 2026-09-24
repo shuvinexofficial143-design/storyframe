@@ -1,3 +1,5 @@
+import {mongoConfigured,mongoDb} from "./mongodb";
+
 export type BackgroundJobStatus="queued"|"running"|"waiting"|"completed"|"failed"|"cancelled";
 
 export type BackgroundJob<TPayload=unknown,TResult=unknown>={
@@ -13,38 +15,50 @@ export type BackgroundJob<TPayload=unknown,TResult=unknown>={
   error?:string;
 };
 
-const prefix="storyframe:bg:";
-const ttlSeconds=24*60*60;
+const COLLECTION="background_jobs";
+const TTL_MS=24*60*60*1000;
 
-function redisUrl(){return (process.env.UPSTASH_REDIS_REST_URL||process.env.KV_REST_API_URL||"").replace(/\/$/,"")}
-function redisToken(){return process.env.UPSTASH_REDIS_REST_TOKEN||process.env.KV_REST_API_TOKEN||""}
-
-export function backgroundRedisConfigured(){return Boolean(redisUrl()&&redisToken())}
-
-async function command(args:Array<string|number>){
-  const url=redisUrl(),token=redisToken();
-  if(!url||!token)throw new Error("Background Redis is not configured. Add UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN in Vercel.");
-  const response=await fetch(url,{
-    method:"POST",
-    headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},
-    body:JSON.stringify(args),
-    cache:"no-store"
-  });
-  const body=await response.json().catch(()=>null) as {result?:unknown;error?:string}|null;
-  if(!response.ok||body?.error)throw new Error(`Background Redis request failed (${response.status})${body?.error?`: ${body.error}`:""}`);
-  return body?.result;
+declare global {
+  // eslint-disable-next-line no-var
+  var __storyframeBackgroundJobsIndexPromise:Promise<unknown>|undefined;
 }
 
+export function backgroundJobStoreConfigured(){return mongoConfigured()}
+
+async function collection(){
+  if(!mongoConfigured())throw new Error("Background job storage is not configured. Add MONGODB_URI in Vercel.");
+  const db=await mongoDb();
+  const jobs=db.collection(COLLECTION);
+  if(!global.__storyframeBackgroundJobsIndexPromise){
+    global.__storyframeBackgroundJobsIndexPromise=jobs.createIndex({expiresAt:1},{expireAfterSeconds:0,name:"background_jobs_expiry"}).catch((error)=>{
+      global.__storyframeBackgroundJobsIndexPromise=undefined;
+      throw error;
+    });
+  }
+  await global.__storyframeBackgroundJobsIndexPromise;
+  return jobs;
+}
+
+function expiry(){return new Date(Date.now()+TTL_MS)}
+
 export async function putBackgroundJob(job:BackgroundJob){
-  await command(["SET",prefix+job.id,JSON.stringify(job),"EX",ttlSeconds]);
+  const jobs=await collection();
+  await jobs.replaceOne(
+    {id:job.id},
+    {...job,expiresAt:expiry()},
+    {upsert:true}
+  );
 }
 
 export async function getBackgroundJob<TPayload=unknown,TResult=unknown>(id:string):Promise<BackgroundJob<TPayload,TResult>|null>{
-  const value=await command(["GET",prefix+id]);
-  if(typeof value!=="string"||!value)return null;
-  try{return JSON.parse(value) as BackgroundJob<TPayload,TResult>}catch{return null}
+  const jobs=await collection();
+  const value=await jobs.findOne({id});
+  if(!value)return null;
+  const {expiresAt:_expiresAt,_id,...job}=value as Record<string,unknown>;
+  return job as unknown as BackgroundJob<TPayload,TResult>;
 }
 
 export async function deleteBackgroundJob(id:string){
-  await command(["DEL",prefix+id]);
+  const jobs=await collection();
+  await jobs.deleteOne({id});
 }
