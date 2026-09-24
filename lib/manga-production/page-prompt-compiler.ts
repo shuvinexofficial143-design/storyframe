@@ -102,7 +102,7 @@ export function compileMangaPagePrompt(input:{
       `Continuity entering panel: ${panel.continuityFromPreviousPanel||page.startState}.`,
       `Continuity leaving panel: ${panel.continuityToNextPanel||page.endState}.`,
       plannerNote?`Planner visual note: ${plannerNote}.`:"",
-      "Leave usable clean negative space near an upper corner for StoryFrame to add dialogue later. Do NOT draw speech balloons or any readable text."
+      "Leave a small clean negative-space area near an upper corner ONLY when this panel contains essential visible dialogue or a critical system notification. Otherwise prioritize uncluttered artwork. Do NOT draw speech balloons, system text, captions or any readable text."
     ].filter(Boolean).join("\n");
   });
 
@@ -125,7 +125,7 @@ export function compileMangaPagePrompt(input:{
     `PANEL BLUEPRINT — obey every numbered panel and its exact slot:\n\n${panelBlocks.join("\n\n")}`,
     strict?"STRICT CONTINUITY ACROSS THE WHOLE PAGE: the same recurring person must have the same face, hair, age, proportions and costume in every panel. Continue physical positions, held objects, injuries, wet/dirty clothing, architecture, recurring colors and screen direction from one panel to the next. Do not teleport or redesign anything unless the supplied story beat explicitly changes it.":"Maintain clear character, prop, location, color and screen-direction continuity across all panels.",
     previousPage?`PREVIOUS PAGE/CHAPTER CONTINUITY: ${previousPage.endState}. The supplied previous-page image, when present, is an authoritative visual continuity reference for character identity, costume, environment design and palette; continue those facts without copying its exact composition.`:"This is the first page with no prior rendered page reference; establish identities clearly from the locked bibles.",
-    "TEXT-FREE ART ONLY: absolutely no dialogue lettering, captions, narration text, speech balloons, thought balloons, readable signs, page title, panel numbers, logos, watermarks or UI. StoryFrame will add dialogue, narration, SFX and the page number after image generation."
+    "TEXT-FREE ART ONLY: absolutely no dialogue lettering, captions, narration text, speech balloons, thought balloons, readable signs, page title, panel numbers, logos, watermarks or UI. StoryFrame will overlay ONLY short essential dialogue, critical system notifications and rare action SFX after generation. Long explanations belong in narration audio, not on the manga art."
   ].filter(Boolean).join("\n\n");
 
   const negative=[

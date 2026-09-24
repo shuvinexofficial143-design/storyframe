@@ -38,13 +38,77 @@ function wrap(ctx:CanvasRenderingContext2D,text:string,maxWidth:number){
   return lines;
 }
 
+
+function compactSystemLines(value:string){
+  const cleaned=value.replace(/\[?system\]?\s*[:\-]?/ig," ").replace(/\s+/g," ").trim();
+  const pieces=cleaned.split(/\n+|(?<=[.!?।])\s+|\s*[|•]+\s*/).map((item)=>item.trim()).filter(Boolean);
+  const priority=/\b(level|rank|quest|reward|skill|warning|penalty|target|hp|mp|gold|exp|experience|unlock|class|title|system)\b|लेवल|रैंक|क्वेस्ट|रिवॉर्ड|स्किल|चेतावनी|इनाम|लक्ष्य/i;
+  const ordered=[...pieces.filter((item)=>priority.test(item)),...pieces.filter((item)=>!priority.test(item))];
+  const unique=ordered.filter((item,index)=>ordered.indexOf(item)===index);
+  return unique.slice(0,3).map((line)=>line.length>78?line.slice(0,75).trimEnd()+"…":line);
+}
+
+function isSystemDialogue(dialogue:MangaDialogue){
+  return /^(system|status|quest|notification|alert)$/i.test(dialogue.speaker.trim())||
+    /\b(system|level up|quest|reward|rank|skill unlocked|warning|penalty)\b|सिस्टम|लेवल अप|क्वेस्ट|रिवॉर्ड|रैंक|स्किल|चेतावनी/i.test(dialogue.text);
+}
+
+function dialoguePriority(dialogue:MangaDialogue){
+  const text=dialogue.text.trim();
+  if(!text)return -100;
+  if(isSystemDialogue(dialogue))return 100;
+  if(dialogue.bubbleType==="shout")return 80;
+  if(dialogue.bubbleType==="speech"||dialogue.bubbleType==="whisper")return text.length<=115?70:30;
+  if(dialogue.bubbleType==="thought")return text.length<=90?55:20;
+  if(dialogue.bubbleType==="narration"){
+    const essential=/\b(later|earlier|meanwhile|suddenly|that night|next day|years? later)\b|अगले दिन|कुछ देर बाद|उसी रात|अचानक|इस बीच/i.test(text);
+    return essential&&text.length<=85?45:-20;
+  }
+  return 0;
+}
+
+function visibleDialogues(dialogues:MangaDialogue[]){
+  return [...dialogues]
+    .map((dialogue,index)=>({dialogue,index,score:dialoguePriority(dialogue)}))
+    .filter((item)=>item.score>=40)
+    .sort((a,b)=>b.score-a.score||a.index-b.index)
+    .slice(0,2)
+    .sort((a,b)=>a.index-b.index)
+    .map((item)=>item.dialogue);
+}
+
+function drawSystemCard(ctx:CanvasRenderingContext2D,dialogue:MangaDialogue,index:number,x:number,y:number,w:number,h:number){
+  const lines=compactSystemLines(dialogue.text);
+  if(!lines.length)return;
+  const cardW=Math.min(w*.72,430);
+  const cardH=Math.min(h*.38,72+lines.length*34);
+  const left=index%2!==0;
+  const bx=left?x+18:x+w-cardW-18;
+  const by=y+18;
+  ctx.save();
+  ctx.fillStyle="rgba(8,14,20,.92)";
+  ctx.strokeStyle="#78e6ff";
+  ctx.lineWidth=3;
+  ctx.beginPath();ctx.roundRect(bx,by,cardW,cardH,14);ctx.fill();ctx.stroke();
+  ctx.fillStyle="#78e6ff";
+  ctx.font="800 20px sans-serif";
+  ctx.textAlign="left";
+  ctx.textBaseline="top";
+  ctx.fillText("SYSTEM",bx+18,by+13);
+  ctx.fillStyle="#f5fbff";
+  ctx.font="600 22px sans-serif";
+  lines.forEach((line,lineIndex)=>ctx.fillText(line,bx+18,by+43+lineIndex*31,cardW-36));
+  ctx.restore();
+}
+
 function drawDialogue(ctx:CanvasRenderingContext2D,dialogue:MangaDialogue,index:number,x:number,y:number,w:number,h:number){
   if(!dialogue.text.trim())return;
-  const bubbleW=Math.min(w*.66,390);
-  const bubbleH=Math.min(180,Math.max(94,74+dialogue.text.length*.82));
+  if(isSystemDialogue(dialogue)){drawSystemCard(ctx,dialogue,index,x,y,w,h);return}
+  const bubbleW=Math.min(w*.58,340);
+  const bubbleH=Math.min(152,Math.max(88,68+Math.min(dialogue.text.length,120)*.62));
   const left=index%2!==0;
   const bx=left?x+18:x+w-bubbleW-18;
-  const by=y+18+(index%3)*36;
+  const by=y+16+(index%2)*28;
 
   ctx.save();
   ctx.lineWidth=4;
@@ -81,7 +145,8 @@ function drawDialogue(ctx:CanvasRenderingContext2D,dialogue:MangaDialogue,index:
   ctx.textAlign="center";
   ctx.textBaseline="middle";
   ctx.font=dialogue.bubbleType==="shout"?"700 30px sans-serif":"600 27px sans-serif";
-  const lines=wrap(ctx,dialogue.text,bubbleW-44).slice(0,5);
+  const displayText=dialogue.text.length>120?dialogue.text.slice(0,117).trimEnd()+"…":dialogue.text;
+  const lines=wrap(ctx,displayText,bubbleW-44).slice(0,4);
   const lineHeight=32;
   const start=by+bubbleH/2-((lines.length-1)*lineHeight)/2;
   lines.forEach((line,lineIndex)=>ctx.fillText(line,bx+bubbleW/2,start+lineIndex*lineHeight));
@@ -112,9 +177,9 @@ export async function composeGeneratedMangaPage(baseImageDataUrl:string,page:Man
     const y=MARGIN+slot.y*contentH;
     const w=Math.max(80,slot.width*contentW);
     const h=Math.max(80,slot.height*contentH);
-    panel.dialogue.slice(0,3).forEach((dialogue,dialogueIndex)=>drawDialogue(ctx,dialogue,dialogueIndex,x,y,w,h));
-    if(panel.soundEffects.length){
-      const sfx=panel.soundEffects[0];
+    visibleDialogues(panel.dialogue).forEach((dialogue,dialogueIndex)=>drawDialogue(ctx,dialogue,dialogueIndex,x,y,w,h));
+    if(panel.soundEffects.length&&/action|impact|attack|hit|crash|boom|bang|slash|thud|explosion|fight/i.test(`${panel.action} ${panel.storyBeat} ${panel.mood}`)){
+      const sfx=panel.soundEffects[0].slice(0,18);
       ctx.save();
       ctx.font="900 38px sans-serif";
       ctx.textAlign="left";
