@@ -40,16 +40,18 @@ export async function POST(request:Request){
     }
 
     const refs=[...task.referenceImages];
-    for(const missing of task.missingReferences){
-      const saved=job.result.references.find(x=>x.name.toLowerCase()===missing.name.toLowerCase());
-      if(saved){refs.push(saved.sourceUrl||saved.imageDataUrl);continue}
+    const missing=task.missingReferences.find(ref=>!job.result!.references.some(saved=>saved.name.toLowerCase()===ref.name.toLowerCase()));
+    if(missing){
       job.progress=`Background: generating ${missing.name} continuity reference for Page ${task.pageNumber}…`;await putBackgroundJob(job);
       const prompt=`Canonical character reference for ${missing.name}. ${missing.referencePrompt} Front portrait, face clearly visible, neutral expression, complete hairstyle and primary costume readable, clean simple background. Same exact recurring identity. No dialogue, captions, labels, watermark, logo or UI.`;
       const generated=await generateImageWithFallback({prompt,seed:missing.seed,width:512,height:512,referenceImages:[],allowFallback:false,retryProvider:false});
       const media=await persistGeneratedImage({imageDataUrl:generated.imageDataUrl,filename:`background-reference-${missing.seed}.webp`,metadata:{type:"character-reference",name:missing.name,seed:missing.seed,model:generated.model,provider:generated.provider}});
-      const item={name:missing.name,imageDataUrl:media.imageUrl,sourceUrl:media.imageUrl,model:generated.model,provider:generated.provider,seed:generated.seed};
-      job.result.references.push(item);refs.push(media.imageUrl);job.attempts=0;job.updatedAt=now();await putBackgroundJob(job);
+      job.result.references.push({name:missing.name,imageDataUrl:media.imageUrl,sourceUrl:media.imageUrl,model:generated.model,provider:generated.provider,seed:generated.seed});
+      job.attempts=0;job.status="queued";job.progress=`Background: ${missing.name} reference saved. Continuing Page ${task.pageNumber}…`;job.updatedAt=now();await putBackgroundJob(job);
+      await publishBackgroundStep({destination:`${new URL(request.url).origin}/api/manga/background-image-worker`,runId:job.id,delaySeconds:10});
+      return NextResponse.json({ok:true,status:"queued"});
     }
+    for(const saved of job.result.references)if(task.missingReferences.some(ref=>ref.name.toLowerCase()===saved.name.toLowerCase()))refs.push(saved.sourceUrl||saved.imageDataUrl);
 
     job.progress=`Background: generating Page ${task.pageNumber} · ${job.result.pages.length+1}/${job.payload.pages.length}…`;await putBackgroundJob(job);
     const generated=await generateImageWithFallback({prompt:task.prompt,seed:task.seed,width:1200,height:1800,negativePrompt:task.negativePrompt,referenceImages:refs.slice(0,4),model:process.env.GEMINI_PAGE_IMAGE_MODEL?.trim()||undefined,allowFallback:false,retryProvider:false});
