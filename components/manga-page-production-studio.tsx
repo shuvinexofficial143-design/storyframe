@@ -783,13 +783,14 @@ export function MangaPageProductionStudio(){
   };
 
   const loadVideoImage=async(src:string)=>{
-    const response=await fetch(src);
-    if(!response.ok)throw new Error("A generated visual could not be loaded for video export.");
-    const blob=await response.blob();
-    const url=URL.createObjectURL(blob);
     const image=new Image();
-    await new Promise<void>((resolve,reject)=>{image.onload=()=>resolve();image.onerror=()=>reject(new Error("A video frame could not be decoded."));image.src=url});
-    return {image,url};
+    image.decoding="async";
+    await new Promise<void>((resolve,reject)=>{
+      image.onload=()=>resolve();
+      image.onerror=()=>reject(new Error("A generated visual could not be decoded for video export."));
+      image.src=src;
+    });
+    return image;
   };
 
   const exportNarrationVideo=async()=>{
@@ -805,32 +806,25 @@ export function MangaPageProductionStudio(){
       return {segment,page};
     });
 
-    setBusy("video-export");setError("");setNotice("");setProgress("Preparing synchronized video export…");
-    const objectUrls:string[]=[];
+    setBusy("video-export");setError("");setNotice("");setProgress("Preparing memory-safe synchronized video export…");
     let audioContext:AudioContext|undefined;
+    let combined:MediaStream|undefined;
     try{
-      const canvas=document.createElement("canvas");canvas.width=1280;canvas.height=720;
-      const ctx=canvas.getContext("2d");if(!ctx)throw new Error("Browser video canvas is unavailable.");
-      const loadedImages:HTMLImageElement[]=[];
-      for(const item of ordered){
-        const loaded=await loadVideoImage(item.page.composedImageDataUrl!);
-        objectUrls.push(loaded.url);loadedImages.push(loaded.image);
-      }
+      const mobile=/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+      const canvas=document.createElement("canvas");
+      canvas.width=mobile?854:1280;
+      canvas.height=mobile?480:720;
+      const fps=mobile?12:24;
+      const videoBitsPerSecond=mobile?900_000:2_500_000;
+      const ctx=canvas.getContext("2d",{alpha:false});if(!ctx)throw new Error("Browser video canvas is unavailable.");
 
       audioContext=new AudioContext();
       await audioContext.resume();
-      const buffers:AudioBuffer[]=[];
-      for(let index=0;index<ordered.length;index+=1){
-        setProgress(`Decoding narration audio ${index+1}/${ordered.length}…`);
-        const bytes=await (await fetch(ordered[index].segment.audioDataUrl!)).arrayBuffer();
-        buffers.push(await audioContext.decodeAudioData(bytes));
-      }
-
       const destination=audioContext.createMediaStreamDestination();
-      const videoStream=canvas.captureStream(30);
-      const combined=new MediaStream([...videoStream.getVideoTracks(),...destination.stream.getAudioTracks()]);
-      const mimeType=MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus")?"video/webm;codecs=vp9,opus":"video/webm";
-      const recorder=new MediaRecorder(combined,{mimeType,videoBitsPerSecond:6_000_000});
+      const videoStream=canvas.captureStream(fps);
+      combined=new MediaStream([...videoStream.getVideoTracks(),...destination.stream.getAudioTracks()]);
+      const mimeType=MediaRecorder.isTypeSupported("video/webm;codecs=vp8,opus")?"video/webm;codecs=vp8,opus":"video/webm";
+      const recorder=new MediaRecorder(combined,{mimeType,videoBitsPerSecond});
       const chunks:Blob[]=[];
       recorder.ondataavailable=(event)=>{if(event.data.size)chunks.push(event.data)};
       const stopped=new Promise<void>((resolve)=>{recorder.onstop=()=>resolve()});
@@ -841,42 +835,51 @@ export function MangaPageProductionStudio(){
         const width=image.naturalWidth*scale,height=image.naturalHeight*scale;
         ctx.drawImage(image,(canvas.width-width)/2,(canvas.height-height)/2,width,height);
       };
-      draw(loadedImages[0]);
 
-      recorder.start(1000);
-      const startAt=audioContext.currentTime+.25;
-      let offset=0;
-      const boundaries:number[]=[0];
-      buffers.forEach((buffer)=>{
-        const source=audioContext!.createBufferSource();
-        source.buffer=buffer;source.connect(destination);source.start(startAt+offset);
-        offset+=buffer.duration;boundaries.push(offset);
-      });
+      recorder.start(2000);
+      let totalSeconds=0;
 
-      let running=true;
-      const render=()=>{
-        if(!running)return;
-        const elapsed=Math.max(0,audioContext!.currentTime-startAt);
-        let frameIndex=0;
-        while(frameIndex<ordered.length-1&&elapsed>=boundaries[frameIndex+1])frameIndex+=1;
-        draw(loadedImages[frameIndex]);
-        requestAnimationFrame(render);
-      };
-      requestAnimationFrame(render);
-      setProgress(`Recording synchronized video · ${ordered.length} visual segments…`);
-      await new Promise<void>((resolve)=>setTimeout(resolve,(offset+.45)*1000));
-      running=false;recorder.stop();await stopped;
+      for(let index=0;index<ordered.length;index+=1){
+        const item=ordered[index];
+        setProgress(`Building video ${index+1}/${ordered.length} · loading Visual Page ${item.segment.pageNumber}…`);
+
+        // Keep only ONE decoded manga page and ONE decoded audio clip in memory at a time.
+        const image=await loadVideoImage(item.page.composedImageDataUrl!);
+        draw(image);
+
+        const audioResponse=await fetch(item.segment.audioDataUrl!);
+        if(!audioResponse.ok)throw new Error(`Visual Page ${item.segment.pageNumber} audio could not be loaded.`);
+        const bytes=await audioResponse.arrayBuffer();
+        const buffer=await audioContext.decodeAudioData(bytes);
+        totalSeconds+=buffer.duration;
+
+        const source=audioContext.createBufferSource();
+        source.buffer=buffer;
+        source.connect(destination);
+        const ended=new Promise<void>((resolve)=>{source.onended=()=>resolve()});
+        source.start(audioContext.currentTime+.06);
+
+        setProgress(`Recording ${index+1}/${ordered.length} · Visual Page ${item.segment.pageNumber} · ${buffer.duration.toFixed(1)}s…`);
+        await ended;
+        source.disconnect();
+
+        // Release decoded image immediately before moving to the next page.
+        image.src="";
+        await new Promise<void>((resolve)=>setTimeout(resolve,25));
+      }
+
+      recorder.stop();await stopped;
       combined.getTracks().forEach((track)=>track.stop());
 
       const blob=new Blob(chunks,{type:mimeType});
       const url=URL.createObjectURL(blob);
       if(videoUrl)URL.revokeObjectURL(videoUrl);
       setVideoUrl(url);
-      setNotice(`Video ready · ${Math.round(offset)}s · images switch exactly at their narration-segment boundaries.`);
+      setNotice(`Video ready · ${Math.round(totalSeconds)}s · ${mobile?"mobile-safe 480p":"720p"} export · each image changes at its matching narration boundary.`);
     }catch(reason){
       setError(reason instanceof Error?reason.message:"Video export failed.");
     }finally{
-      objectUrls.forEach((url)=>URL.revokeObjectURL(url));
+      combined?.getTracks().forEach((track)=>track.stop());
       if(audioContext)void audioContext.close();
       setBusy("");setProgress("");
     }
