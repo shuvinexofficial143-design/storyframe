@@ -4,6 +4,7 @@ import {isVertexStoryAnalysisModel,vertexStoryModelId,type StoryAnalysisModel} f
 type ServiceAccount={project_id?:string;client_email:string;private_key:string;token_uri?:string};
 type VertexCompletionInput={model:StoryAnalysisModel;systemPrompt:string;userPrompt:string;maxTokens?:number;temperature?:number};
 type VertexPayload={candidates?:Array<{finishReason?:string;content?:{parts?:Array<{text?:unknown;thought?:unknown}>}}>};
+type VertexAttempt={text:string;finishReason:string;rawCandidateCount:number};
 
 const GOOGLE_SCOPE="https://www.googleapis.com/auth/cloud-platform";
 const GOOGLE_TOKEN_URL="https://oauth2.googleapis.com/token";
@@ -170,7 +171,7 @@ async function requestOnce(input:VertexCompletionInput,userPrompt:string,maxOutp
   let payload:VertexPayload;
   try{payload=JSON.parse(raw) as VertexPayload}catch{throw new Error("Vertex Gemini returned an invalid API response.")}
   const text=responseText(payload);
-  return {text,finishReason:payload.candidates?.[0]?.finishReason||""};
+  return {text,finishReason:payload.candidates?.[0]?.finishReason||"",rawCandidateCount:payload.candidates?.length||0} satisfies VertexAttempt;
 }
 
 export async function vertexStoryJsonCompletion(input:VertexCompletionInput){
@@ -197,7 +198,14 @@ export async function vertexStoryJsonCompletion(input:VertexCompletionInput){
   const retryPrompt=`${input.userPrompt}\n\nSTRICT JSON RECOVERY RETRY: Return exactly ONE COMPLETE valid JSON object and nothing else. Do not use markdown fences. Preserve every requested story beat and its order. Keep descriptions concise enough to finish the entire object. Escape quotes and line breaks inside strings. Do not use trailing commas. Close every array and object. Never stop mid-JSON. IMPORTANT: produce the final JSON response directly; do not spend the response budget on hidden reasoning.`;
   const retry=await requestOnce({...input,temperature:Math.min(input.temperature??0.12,0.03)},retryPrompt,GEMINI_31_PRO_MAX_OUTPUT_TOKENS,"MEDIUM");
   if(!retry.text){
-    throw new Error(`Vertex Gemini returned an empty story analysis response twice (finish reason: ${retry.finishReason||"unknown"}). Please retry; StoryFrame already performed an immediate full-budget recovery attempt.`);
+    console.warn("Vertex Gemini recovery retry also returned no visible JSON; attempting one low-thinking recovery.",{finishReason:retry.finishReason||"unknown",candidateCount:retry.rawCandidateCount});
+    const finalPrompt=`${input.userPrompt}\n\nFINAL JSON-ONLY RECOVERY: Return the requested complete JSON object immediately. No analysis, no explanation, no markdown. Keep descriptive strings concise while preserving all required fields and story order.`;
+    const finalAttempt=await requestOnce({...input,temperature:0},finalPrompt,GEMINI_31_PRO_MAX_OUTPUT_TOKENS,"MEDIUM");
+    if(!finalAttempt.text){
+      throw new Error(`Vertex Gemini returned no visible story JSON after recovery attempts (finish reason: ${finalAttempt.finishReason||retry.finishReason||"unknown"}, candidates: ${finalAttempt.rawCandidateCount}). Retry the analysis; if this repeats, reduce the chapter/planning input size.`);
+    }
+    if(finalAttempt.finishReason==="MAX_TOKENS")throw new Error("Vertex Gemini structured output exceeded the full 65K output budget. StoryFrame should split this planning step into smaller chunks.");
+    return {text:finalAttempt.text,json:parseVertexJsonObject(finalAttempt.text)};
   }
   if(retry.finishReason==="MAX_TOKENS")throw new Error("Vertex Gemini structured output exceeded the full 65K output budget. StoryFrame should split this planning step into smaller chunks.");
   return {text:retry.text,json:parseVertexJsonObject(retry.text)};
