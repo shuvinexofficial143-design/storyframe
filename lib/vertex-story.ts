@@ -179,9 +179,9 @@ export async function vertexStoryJsonCompletion(input:VertexCompletionInput){
   // Page planning is mostly deterministic formatting, so MEDIUM thinking is faster and leaves
   // more output budget for the large JSON. Master/global story analysis keeps HIGH reasoning.
   const pageLike=/Page Planner|Beat Director/i.test(input.systemPrompt);
-  const firstThinking=pageLike?"MEDIUM" as const:"HIGH" as const;
+  const firstThinking="MEDIUM" as const;
   const requested=input.maxTokens??14000;
-  const firstBudget=Math.max(requested,32768);
+  // HIGH thinking can consume the response internally and Vertex may return a candidate with no visible JSON.\n  // MEDIUM is sufficient for this structured extraction and keeps budget for the actual response.\n  const firstBudget=Math.max(requested,32768);
   const first=await requestOnce(input,input.userPrompt,firstBudget,firstThinking);
 
   if(first.text&&first.finishReason!=="MAX_TOKENS"){
