@@ -5,7 +5,7 @@ export type BackgroundJobStatus="queued"|"running"|"waiting"|"completed"|"failed
 export type BackgroundJob<TPayload=unknown,TResult=unknown>={
   id:string;
   status:BackgroundJobStatus;
-  phase:"master"|"pages"|"complete";
+  phase:"master"|"pages"|"images"|"complete";
   progress:string;
   createdAt:string;
   updatedAt:string;
