@@ -864,18 +864,25 @@ export function MangaPageProductionStudio(){
       const drawAnimated=(image:HTMLImageElement,progress:number,index:number)=>{
         ctx.fillStyle="#000";ctx.fillRect(0,0,canvas.width,canvas.height);
         const p=Math.max(0,Math.min(1,progress));
-        const baseScale=Math.min(canvas.width/image.naturalWidth,canvas.height/image.naturalHeight);
-        const mode=index%4;
-        const zoom=mode===3?1.10-(.08*p):1.02+(.08*p);
+        // Use cover rather than contain so every frame has real room to move; the old
+        // contain fit often had zero freeX/freeY and therefore looked almost static.
+        const baseScale=Math.max(canvas.width/image.naturalWidth,canvas.height/image.naturalHeight);
+        const mode=index%6;
+        const eased=.5-.5*Math.cos(Math.PI*p);
+        const zoomStart=mode===4?1.16:1.07;
+        const zoomEnd=mode===4?1.07:(mode===5?1.19:1.16);
+        const zoom=zoomStart+(zoomEnd-zoomStart)*eased;
         const scale=baseScale*zoom;
         const width=image.naturalWidth*scale,height=image.naturalHeight*scale;
-        const freeX=Math.max(0,(width-canvas.width)/2);
-        const freeY=Math.max(0,(height-canvas.height)/2);
+        const travelX=Math.min(canvas.width*.10,Math.max(18,(width-canvas.width)/2));
+        const travelY=Math.min(canvas.height*.09,Math.max(14,(height-canvas.height)/2));
         let panX=0,panY=0;
-        if(mode===0)panY=(.5-p)*Math.min(canvas.height*.07,Math.max(10,freeY));
-        if(mode===1)panX=(p-.5)*Math.min(canvas.width*.08,Math.max(12,freeX));
-        if(mode===2){panX=(.5-p)*Math.min(canvas.width*.06,Math.max(10,freeX));panY=(p-.5)*Math.min(canvas.height*.05,Math.max(8,freeY));}
-        if(mode===3)panY=(p-.5)*Math.min(canvas.height*.04,Math.max(8,freeY));
+        if(mode===0)panX=(eased-.5)*2*travelX;
+        if(mode===1)panX=(.5-eased)*2*travelX;
+        if(mode===2)panY=(eased-.5)*2*travelY;
+        if(mode===3)panY=(.5-eased)*2*travelY;
+        if(mode===4){panX=(eased-.5)*travelX;panY=(.5-eased)*travelY;}
+        if(mode===5){panX=(.5-eased)*travelX;panY=(eased-.5)*travelY;}
         ctx.drawImage(image,(canvas.width-width)/2-panX,(canvas.height-height)/2-panY,width,height);
       };
 
@@ -918,11 +925,18 @@ export function MangaPageProductionStudio(){
         drawAnimated(image,1,index);
         source.disconnect();
 
-        // Release decoded image immediately before moving to the next page.
+        // Give captureStream enough time to commit the final frame before swapping the
+        // decoded image. Without this, MediaRecorder can keep audio moving while the
+        // video track is still showing an older page, especially near the end on mobile.
+        await new Promise<void>((resolve)=>setTimeout(resolve,Math.ceil(2000/fps)));
         image.src="";
-        await new Promise<void>((resolve)=>setTimeout(resolve,25));
       }
 
+      // Flush the last visual frame into the recorder before stopping. This prevents
+      // the final narration tail from outrunning the final manga page.
+      await new Promise<void>((resolve)=>setTimeout(resolve,Math.ceil(3000/fps)));
+      recorder.requestData();
+      await new Promise<void>((resolve)=>setTimeout(resolve,120));
       recorder.stop();await stopped;
       combined.getTracks().forEach((track)=>track.stop());
 
