@@ -26,9 +26,16 @@ export async function POST(request:Request){
     if(!parsed.success)return NextResponse.json({error:"Invalid character reference request",details:parsed.error.flatten()},{status:400});
 
     const {name,referencePrompt,seed,view}=parsed.data;
+    // Reference sheets only need stable visible identity. Remove common
+    // story-context wording that can trip image safety filters even when the
+    // intended output is a neutral character turnaround.
+    const safeReferencePrompt=referencePrompt
+      .replace(/\b(?:blood|bloody|gore|corpse|dead body|murder(?:ed)?|kill(?:ed|ing)?|suicide|self[- ]harm|tortur(?:e|ed|ing)|sexual|nude|naked|explicit)\b/gi,"")
+      .replace(/\s{2,}/g," ")
+      .trim();
     const prompt=[
       `Canonical character reference for ${name}.`,
-      referencePrompt,
+      safeReferencePrompt,
       VIEW_PROMPT[view],
       "This is a master StoryFrame identity asset, not a story scene. Make the face distinctive and repeatable. Preserve exact facial structure, eye color, hairstyle, apparent age, body proportions, costume silhouette, colors and signature accessories. No dialogue, captions, labels, watermark, logo or UI."
     ].join(" ");
