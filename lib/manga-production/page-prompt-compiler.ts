@@ -23,15 +23,6 @@ function selectedPageImage(page?:MangaPage){
 
 function imageSafeStoryText(value:string){
   return value
-    .replace(/\b(?:gore|gory|blood(?:y)?|bleeding|corpse|dead body|mutilat(?:e|ed|ion)|dismember(?:ed|ment)?|decapitat(?:e|ed|ion)|disembowel(?:ed|ment)?|tortur(?:e|ed|ing)|suicide|self[- ]harm|rape|sexual assault|explicit sex|nude|naked)\b/gi,"")
-    .replace(/\b(?:kill|killed|killing|murder|murdered|die|dies|died|death)\b/gi,"defeat")
-    .replace(/\b(?:stab|stabbed|stabbing|shoot|shot|shooting)\b/gi,"confront")
-    .replace(/\s{2,}/g," ")
-    .trim();
-}
-
-function imageSafeStoryText(value:string){
-  return value
     .replace(/\b(?:gore|gory|blood(?:y|ied|shed)?|mutilat(?:e|ed|ion)|dismember(?:ed|ment)?|decapitat(?:e|ed|ion)|disembowel(?:ed|ment)?|corpse|dead body|suicide|self[- ]harm|tortur(?:e|ed|ing)|rape|sexual assault|explicit sex|nude|naked)\b/gi,"non-graphic obscured detail")
     .replace(/\b(?:stab(?:bed|bing)?|shoot(?:ing|s|shot)?|kill(?:ed|ing|s)?|murder(?:ed|ing|s)?)\b/gi,"off-screen dangerous confrontation")
     .replace(/\s{2,}/g," ")
