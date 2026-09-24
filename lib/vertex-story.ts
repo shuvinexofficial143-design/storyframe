@@ -181,7 +181,9 @@ export async function vertexStoryJsonCompletion(input:VertexCompletionInput){
   const pageLike=/Page Planner|Beat Director/i.test(input.systemPrompt);
   const firstThinking="MEDIUM" as const;
   const requested=input.maxTokens??14000;
-  // HIGH thinking can consume the response internally and Vertex may return a candidate with no visible JSON.\n  // MEDIUM is sufficient for this structured extraction and keeps budget for the actual response.\n  const firstBudget=Math.max(requested,32768);
+  // HIGH thinking can consume the response internally and Vertex may return a candidate with no visible JSON.
+  // MEDIUM is sufficient for this structured extraction and keeps budget for the actual response.
+  const firstBudget=Math.max(requested,32768);
   const first=await requestOnce(input,input.userPrompt,firstBudget,firstThinking);
 
   if(first.text&&first.finishReason!=="MAX_TOKENS"){
