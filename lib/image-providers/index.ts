@@ -103,7 +103,26 @@ async function executeProvider(provider:ImageProvider,input:ImageGenerationInput
   }else if(provider.responseKind==="gemini-json"){
     const payload=await response.json();
     const image=extractGeminiImage(payload);
-    if(!image)throw new Error(`${provider.name} returned no generated image.`);
+    if(!image){
+      const data=payload as {
+        candidates?:Array<{finishReason?:unknown;finishMessage?:unknown;content?:{parts?:unknown[]}}>;
+        promptFeedback?:unknown;
+        error?:unknown;
+      };
+      const diagnostic={
+        model,
+        candidateCount:data.candidates?.length||0,
+        candidates:(data.candidates||[]).slice(0,3).map((candidate)=>({
+          finishReason:candidate.finishReason,
+          finishMessage:candidate.finishMessage,
+          partCount:Array.isArray(candidate.content?.parts)?candidate.content.parts.length:0
+        })),
+        promptFeedback:data.promptFeedback,
+        error:data.error
+      };
+      console.error("Gemini image response contained no image.",diagnostic);
+      throw new Error(`${provider.name} returned no generated image. Diagnostic: ${JSON.stringify(diagnostic).slice(0,1200)}`);
+    }
     imageDataUrl=`data:${image.mimeType};base64,${image.data}`;
   }else{
     const contentType=response.headers.get("content-type")||"image/jpeg";
