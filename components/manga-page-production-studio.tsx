@@ -844,6 +844,10 @@ export function MangaPageProductionStudio(){
     }finally{setBusy("");setProgress("")}
   };
 
+  const savePipelineCheckpoint=(phase:"idle"|"analysis"|"planning"|"images"|"narration"|"voice"|"video"|"complete"|"error",message="")=>{
+    void fetch("/api/manga/pipeline-job",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({projectId:project.id,chapterId:chapter.id,phase,message})}).catch(()=>{});
+  };
+
   // AUTO is a resumable chapter state machine. It never changes the existing generators:
   // it only calls the same Analyze/Plan, Generate Pages, Narration, TTS and Video actions
   // in order, skipping work that is already saved.
@@ -856,13 +860,14 @@ export function MangaPageProductionStudio(){
       const ch=p?.chapters.find((item)=>item.id===p.activeChapterId);
       if(!p||!ch){setAutoChapter(false);return}
       if(ch.story.trim().length<20){setError("AUTO के लिए पहले chapter story डालो।");setAutoChapter(false);return}
-      if(!ch.manga?.beats.length){setTab("story");void buildManga();return}
-      if(ch.manga.nextBeatIndex<ch.manga.beats.length){setTab("script");void planNextPages();return}
-      if(ch.manga.pages.some((page)=>!page.composedImageDataUrl)){setTab("pages");void generateAllPages();return}
-      if(!ch.narration?.segments.length){setTab("narration");void generateNarrationPlan();return}
-      if(ch.narration.segments.some((segment)=>!segment.audioDataUrl)){setTab("narration");void generateNarrationAudio();return}
-      if(!videoUrl){setTab("narration");void exportNarrationVideo();return}
+      if(!ch.manga?.beats.length){savePipelineCheckpoint("analysis","Analyzing and planning chapter");setTab("story");void buildManga();return}
+      if(ch.manga.nextBeatIndex<ch.manga.beats.length){savePipelineCheckpoint("planning","Planning remaining manga pages");setTab("script");void planNextPages();return}
+      if(ch.manga.pages.some((page)=>!page.composedImageDataUrl)){savePipelineCheckpoint("images","Generating remaining manga pages");setTab("pages");void generateAllPages();return}
+      if(!ch.narration?.segments.length){savePipelineCheckpoint("narration","Generating explainer and visual sync");setTab("narration");void generateNarrationPlan();return}
+      if(ch.narration.segments.some((segment)=>!segment.audioDataUrl)){savePipelineCheckpoint("voice","Generating remaining narration audio");setTab("narration");void generateNarrationAudio();return}
+      if(!videoUrl){savePipelineCheckpoint("video","Building final synchronized video");setTab("narration");void exportNarrationVideo();return}
       setAutoChapter(false);
+      savePipelineCheckpoint("complete","Chapter pipeline complete");
       setTab("narration");
       setNotice("AUTO complete. This chapter now has planned visuals, generated manga pages, synchronized narration audio and the final video.");
     },120);
