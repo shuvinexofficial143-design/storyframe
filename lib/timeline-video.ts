@@ -1,6 +1,6 @@
 export type TimelineVideoSegment={id:string;pageNumber:number;image:string;audio:string};
 
-type Loaded={segment:TimelineVideoSegment;image:HTMLImageElement;buffer:AudioBuffer;start:number;duration:number};
+type Timed={segment:TimelineVideoSegment;buffer:AudioBuffer;start:number;duration:number};
 
 function loadImage(src:string){
   return new Promise<HTMLImageElement>((resolve,reject)=>{
@@ -56,9 +56,14 @@ export async function buildTimelineVideo(segments:TimelineVideoSegment[],options
     const timing=buffers.map((buffer,index)=>{const item={segment:segments[index],buffer,start:cursor,duration:buffer.duration};cursor+=buffer.duration;return item});
     const total=Math.max(.1,cursor);
 
-    options.onProgress?.("Preloading manga pages before recording…");
-    const images=await Promise.all(segments.map((segment)=>loadImage(segment.image)));
-    const loaded:Loaded[]=timing.map((item,index)=>({...item,image:images[index]}));
+    // Do NOT decode every manga page at once. Mobile Chrome can kill the whole tab when
+    // several full-resolution pages + audio + recorder buffers coexist. Keep only current
+    // and next images decoded; the immutable audio timeline still remains authoritative.
+    const loaded:Timed[]=timing;
+    options.onProgress?.("Loading first manga page…");
+    let currentIndex=0;
+    let currentImage=await loadImage(loaded[0].segment.image);
+    let nextImagePromise:Promise<HTMLImageElement>|null=loaded.length>1?loadImage(loaded[1].segment.image):null;
 
     const canvas=document.createElement("canvas");canvas.width=options.width;canvas.height=options.height;
     const ctx=canvas.getContext("2d",{alpha:false});if(!ctx)throw new Error("Canvas video export is unavailable.");
@@ -74,29 +79,45 @@ export async function buildTimelineVideo(segments:TimelineVideoSegment[],options
     loaded.forEach((item)=>{
       const source=audioContext.createBufferSource();source.buffer=item.buffer;source.connect(destination);source.start(startAt+item.start);
     });
-    drawNoCrop(ctx,loaded[0].image,options.width,options.height,0,0);
-    recorder.start(1000);
+    drawNoCrop(ctx,currentImage,options.width,options.height,0,0);
+    // Smaller chunks let the browser hand completed encoded data back regularly instead
+    // of retaining one giant internal recorder buffer until the end.
+    recorder.start(500);
 
-    await new Promise<void>((resolve)=>{
-      let lastIndex=-1;
+    await new Promise<void>((resolve,reject)=>{
+      let switching=false;
       const tick=()=>{
         const t=Math.max(0,audioContext.currentTime-startAt);
-        if(t>=total){drawNoCrop(ctx,loaded.at(-1)!.image,options.width,options.height,1,loaded.length-1);resolve();return}
-        let lo=0,hi=loaded.length-1;
-        while(lo<hi){const mid=Math.floor((lo+hi+1)/2);if(loaded[mid].start<=t)lo=mid;else hi=mid-1}
-        const item=loaded[lo];
+        if(t>=total){drawNoCrop(ctx,currentImage,options.width,options.height,1,currentIndex);resolve();return}
+        let target=0,hi=loaded.length-1;
+        while(target<hi){const mid=Math.floor((target+hi+1)/2);if(loaded[mid].start<=t)target=mid;else hi=mid-1}
+
+        if(target!==currentIndex&&!switching){
+          switching=true;
+          const wanted=target;
+          const promise=wanted===currentIndex+1&&nextImagePromise?nextImagePromise:loadImage(loaded[wanted].segment.image);
+          void promise.then((image)=>{
+            const previous=currentImage;
+            currentImage=image;currentIndex=wanted;previous.src="";
+            nextImagePromise=currentIndex+1<loaded.length?loadImage(loaded[currentIndex+1].segment.image):null;
+            options.onProgress?.(`Rendering timeline ${currentIndex+1}/${loaded.length} · Page ${loaded[currentIndex].segment.pageNumber}`);
+          }).catch(reject).finally(()=>{switching=false});
+        }
+
+        const item=loaded[currentIndex];
         const local=Math.max(0,Math.min(1,(t-item.start)/Math.max(.05,item.duration)));
-        drawNoCrop(ctx,item.image,options.width,options.height,local,lo);
-        if(lo!==lastIndex){lastIndex=lo;options.onProgress?.(`Rendering timeline ${lo+1}/${loaded.length} · Page ${item.segment.pageNumber}`)}
+        drawNoCrop(ctx,currentImage,options.width,options.height,local,currentIndex);
         requestAnimationFrame(tick);
       };
+      options.onProgress?.(`Rendering timeline 1/${loaded.length} · Page ${loaded[0].segment.pageNumber}`);
       requestAnimationFrame(tick);
     });
 
     await new Promise<void>((resolve)=>setTimeout(resolve,Math.ceil(1000/options.fps)));
     recorder.requestData();recorder.stop();await stopped;
     stream.getTracks().forEach((track)=>track.stop());canvasStream.getTracks().forEach((track)=>track.stop());
-    images.forEach((image)=>{image.src=""});
+    currentImage.src="";
+    if(nextImagePromise)void nextImagePromise.then((image)=>{image.src=""}).catch(()=>{});
     return {blob:new Blob(chunks,{type}),totalSeconds:total,mimeType:type};
   }finally{await audioContext.close()}
 }
