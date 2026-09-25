@@ -17,6 +17,7 @@ import {downloadDataUrl} from "@/lib/manga-production/composer";
 import {continuationContextText,getInheritedMangaStyle,getPreviousChapterContinuity,getPreviousRenderedMangaPage} from "@/lib/manga-production/chapter-continuity";
 import {requestQueuedMangaImage} from "@/lib/manga-production/image-request-queue";
 import {DEFAULT_TTS_VOICE,STORYFRAME_TTS_VOICES} from "@/lib/tts-voices";
+import {buildTimelineVideo} from "@/lib/timeline-video";
 
 const now=()=>new Date().toISOString();
 const wait=(ms:number)=>new Promise<void>((resolve)=>setTimeout(resolve,ms));
@@ -63,6 +64,7 @@ export function MangaPageProductionStudio(){
   const [narrationVoice,setNarrationVoice]=useState<string>(DEFAULT_TTS_VOICE);
   const [narrationStyle,setNarrationStyle]=useState("Fast-paced Hindi fantasy/anime recap voice. Speak like the protagonist is personally recounting what is happening right now: direct, energetic, confident and slightly raw. Keep sentences short, transitions quick, and emphasize sudden danger, attacks, wins, losses, ranks, numbers, rewards and discoveries when present. Use natural micro-pauses after strong actions and reveals, but do not become theatrical or documentary-like. Avoid formal newsreader cadence and avoid reading every line with the same rhythm. Pronunciation must stay clear and human.");
   const [videoUrl,setVideoUrl]=useState("");
+  const [autoChapter,setAutoChapter]=useState(false);
   const [promptEditorPageId,setPromptEditorPageId]=useState<string|null>(null);
   const [pagePromptOverrides,setPagePromptOverrides]=useState<Record<string,string>>({});
   const busyRef=useRef(busy);
@@ -814,166 +816,58 @@ export function MangaPageProductionStudio(){
     }
   };
 
-  const loadVideoImage=async(src:string)=>{
-    const image=new Image();
-    image.decoding="async";
-    await new Promise<void>((resolve,reject)=>{
-      image.onload=()=>resolve();
-      image.onerror=()=>reject(new Error("A generated visual could not be decoded for video export."));
-      image.src=src;
-    });
-    return image;
-  };
-
   const exportNarrationVideo=async()=>{
     const current=stateRef.current.projects.find((item)=>item.id===project.id)?.chapters.find((item)=>item.id===chapter.id);
     const narration=current?.narration;
     const currentProduction=current?.manga;
     if(!narration?.segments.length||!currentProduction?.pages.length){setError("पहले images और narration तैयार करो।");return}
-    const missingAudio=narration.segments.find((segment)=>!segment.audioDataUrl);
-    if(missingAudio){setError(`Visual Page ${missingAudio.pageNumber} का audio अभी generate नहीं हुआ है।`);return}
     const ordered=narration.segments.map((segment)=>{
       const page=currentProduction.pages.find((item)=>item.id===segment.pageId);
+      if(!segment.audioDataUrl)throw new Error(`Visual Page ${segment.pageNumber} का audio अभी generate नहीं हुआ है।`);
       if(!page?.composedImageDataUrl)throw new Error(`Visual Page ${segment.pageNumber} की generated image अभी तैयार नहीं है।`);
-      return {segment,page};
+      return {id:segment.id,pageNumber:segment.pageNumber,image:page.composedImageDataUrl,audio:segment.audioDataUrl};
     });
 
-    setBusy("video-export");setError("");setNotice("");setProgress("Preparing memory-safe synchronized video export…");
-    let audioContext:AudioContext|undefined;
-    let combined:MediaStream|undefined;
+    setBusy("video-export");setError("");setNotice("");setProgress("Building deterministic master timeline…");
     try{
       const mobile=/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
-      const canvas=document.createElement("canvas");
-      canvas.width=mobile?854:1280;
-      canvas.height=mobile?480:720;
-      const fps=mobile?12:24;
-      const videoBitsPerSecond=mobile?900_000:2_500_000;
-      const ctx=canvas.getContext("2d",{alpha:false});if(!ctx)throw new Error("Browser video canvas is unavailable.");
-
-      audioContext=new AudioContext();
-      await audioContext.resume();
-      const destination=audioContext.createMediaStreamDestination();
-      const videoStream=canvas.captureStream(fps);
-      combined=new MediaStream([...videoStream.getVideoTracks(),...destination.stream.getAudioTracks()]);
-      const mimeType=MediaRecorder.isTypeSupported("video/webm;codecs=vp8,opus")?"video/webm;codecs=vp8,opus":"video/webm";
-      const recorder=new MediaRecorder(combined,{mimeType,videoBitsPerSecond});
-      const chunks:Blob[]=[];
-      recorder.ondataavailable=(event)=>{if(event.data.size)chunks.push(event.data)};
-      const stopped=new Promise<void>((resolve)=>{recorder.onstop=()=>resolve()});
-
-      const drawAnimated=(image:HTMLImageElement,progress:number,index:number)=>{
-        ctx.fillStyle="#000";ctx.fillRect(0,0,canvas.width,canvas.height);
-        const p=Math.max(0,Math.min(1,progress));
-        const eased=.5-.5*Math.cos(Math.PI*p);
-
-        // Cinematic background may crop, but the actual manga page NEVER does.
-        const cover=Math.max(canvas.width/image.naturalWidth,canvas.height/image.naturalHeight)*1.06;
-        const bgW=image.naturalWidth*cover,bgH=image.naturalHeight*cover;
-        ctx.save();ctx.globalAlpha=.32;ctx.filter="blur(18px) brightness(0.55)";
-        ctx.drawImage(image,(canvas.width-bgW)/2,(canvas.height-bgH)/2,bgW,bgH);
-        ctx.restore();
-
-        // Keep the complete foreground page inside the frame at every animation point.
-        const contain=Math.min(canvas.width/image.naturalWidth,canvas.height/image.naturalHeight);
-        const mode=index%6;
-        const pulse=mode===4?1-.035*eased:.965+.035*eased;
-        const scale=contain*pulse;
-        const width=image.naturalWidth*scale,height=image.naturalHeight*scale;
-        const safeX=Math.max(0,(canvas.width-width)/2);
-        const safeY=Math.max(0,(canvas.height-height)/2);
-        const travelX=Math.min(canvas.width*.025,safeX*.55);
-        const travelY=Math.min(canvas.height*.025,safeY*.55);
-        let panX=0,panY=0;
-        if(mode===0)panX=(eased-.5)*2*travelX;
-        if(mode===1)panX=(.5-eased)*2*travelX;
-        if(mode===2)panY=(eased-.5)*2*travelY;
-        if(mode===3)panY=(.5-eased)*2*travelY;
-        if(mode===4){panX=(eased-.5)*travelX;panY=(.5-eased)*travelY;}
-        if(mode===5){panX=(.5-eased)*travelX;panY=(eased-.5)*travelY;}
-        ctx.drawImage(image,(canvas.width-width)/2+panX,(canvas.height-height)/2+panY,width,height);
-      };
-
-      const loadSegmentAsset=async(index:number)=>{
-        const item=ordered[index];
-        const [image,audioResponse]=await Promise.all([
-          loadVideoImage(item.page.composedImageDataUrl!),
-          fetch(item.segment.audioDataUrl!)
-        ]);
-        if(!audioResponse.ok)throw new Error(`Visual Page ${item.segment.pageNumber} audio could not be loaded.`);
-        const bytes=await audioResponse.arrayBuffer();
-        const buffer=await audioContext!.decodeAudioData(bytes);
-        return {image,buffer};
-      };
-
-      // Critical sync rule: never start MediaRecorder while waiting on network/image decode.
-      // The old exporter recorded those loading gaps, which made visuals fall behind narration.
-      setProgress("Preloading first synchronized page…");
-      let currentAsset=await loadSegmentAsset(0);
-      recorder.start(1000);
-      let totalSeconds=0;
-
-      for(let index=0;index<ordered.length;index+=1){
-        const item=ordered[index];
-        const {image,buffer}=currentAsset;
-        totalSeconds+=buffer.duration;
-
-        // Load the NEXT page while the current narration is playing. This hides almost all
-        // asset-loading time without recording stale frames.
-        const nextPromise=index+1<ordered.length?loadSegmentAsset(index+1):null;
-
-        const source=audioContext.createBufferSource();
-        source.buffer=buffer;source.connect(destination);
-        const ended=new Promise<void>((resolve)=>{source.onended=()=>resolve()});
-        const startTime=audioContext.currentTime+.04;
-        drawAnimated(image,0,index);
-        source.start(startTime);
-
-        let animationActive=true;
-        let lastDraw=0;
-        const frameInterval=1000/fps;
-        const animateFrame=(stamp:number)=>{
-          if(!animationActive)return;
-          if(stamp-lastDraw>=frameInterval){
-            const elapsed=Math.max(0,audioContext!.currentTime-startTime);
-            drawAnimated(image,buffer.duration>0?elapsed/buffer.duration:1,index);
-            lastDraw=stamp;
-          }
-          requestAnimationFrame(animateFrame);
-        };
-        requestAnimationFrame(animateFrame);
-        setProgress(`Building ${index+1}/${ordered.length} · Visual Page ${item.segment.pageNumber} · ${buffer.duration.toFixed(1)}s…`);
-
-        await ended;
-        animationActive=false;
-        drawAnimated(image,1,index);
-        source.disconnect();
-
-        if(nextPromise){
-          currentAsset=await nextPromise;
-          image.src="";
-        }else image.src="";
-      }
-
-      // One short frame interval is enough to commit the last canvas state; long artificial
-      // waits made exports slower and could create a visible frozen tail.
-      await new Promise<void>((resolve)=>setTimeout(resolve,Math.ceil(1000/fps)));
-      recorder.requestData();
-      recorder.stop();await stopped;
-      combined.getTracks().forEach((track)=>track.stop());
-
-      const blob=new Blob(chunks,{type:mimeType});
-      const url=URL.createObjectURL(blob);
+      const result=await buildTimelineVideo(ordered,{
+        width:mobile?854:1280,height:mobile?480:720,fps:mobile?18:30,bitrate:mobile?1_400_000:4_500_000,
+        onProgress:setProgress
+      });
+      const url=URL.createObjectURL(result.blob);
       if(videoUrl)URL.revokeObjectURL(videoUrl);
       setVideoUrl(url);
-      setNotice(`Video ready · ${Math.round(totalSeconds)}s · ${mobile?"mobile-safe 480p":"720p"} export · synced image changes + gentle cinematic pan/zoom motion.`);
+      setNotice(`Video ready · ${Math.round(result.totalSeconds)}s · master-clock synchronized · full manga pages preserved without crop.`);
     }catch(reason){
       setError(reason instanceof Error?reason.message:"Video export failed.");
-    }finally{
-      combined?.getTracks().forEach((track)=>track.stop());
-      if(audioContext)void audioContext.close();
-      setBusy("");setProgress("");
-    }
+    }finally{setBusy("");setProgress("")}
   };
+
+  // AUTO is a resumable chapter state machine. It never changes the existing generators:
+  // it only calls the same Analyze/Plan, Generate Pages, Narration, TTS and Video actions
+  // in order, skipping work that is already saved.
+  useEffect(()=>{
+    if(!autoChapter||busy)return;
+    if(error){setAutoChapter(false);return}
+    const timer=window.setTimeout(()=>{
+      const currentState=stateRef.current;
+      const p=currentState.projects.find((item)=>item.id===currentState.activeProjectId);
+      const ch=p?.chapters.find((item)=>item.id===p.activeChapterId);
+      if(!p||!ch){setAutoChapter(false);return}
+      if(ch.story.trim().length<20){setError("AUTO के लिए पहले chapter story डालो।");setAutoChapter(false);return}
+      if(!ch.manga?.beats.length){setTab("story");void buildManga();return}
+      if(ch.manga.nextBeatIndex<ch.manga.beats.length){setTab("script");void planNextPages();return}
+      if(ch.manga.pages.some((page)=>!page.composedImageDataUrl)){setTab("pages");void generateAllPages();return}
+      if(!ch.narration?.segments.length){setTab("narration");void generateNarrationPlan();return}
+      if(ch.narration.segments.some((segment)=>!segment.audioDataUrl)){setTab("narration");void generateNarrationAudio();return}
+      if(!videoUrl){setTab("narration");void exportNarrationVideo();return}
+      setAutoChapter(false);
+      setTab("narration");
+      setNotice("AUTO complete. This chapter now has planned visuals, generated manga pages, synchronized narration audio and the final video.");
+    },120);
+    return()=>window.clearTimeout(timer);
+  },[autoChapter,busy,error,state,videoUrl]);
 
   const chapterNumber=Math.max(1,project.chapters.findIndex((item)=>item.id===chapter.id)+1);
   const generatedChapterPages=chapter.manga?.pages.filter((page)=>Boolean(page.composedImageDataUrl)).length||0;
@@ -1002,7 +896,7 @@ export function MangaPageProductionStudio(){
             </select>
           </div>
         </div>
-        <div className="mt-4 flex gap-2 overflow-x-auto">{tabs.map(([id,label])=><button key={id} onClick={()=>setTab(id)} className={`whitespace-nowrap rounded-xl px-4 py-2 text-sm ${tab===id?"bg-violet-500 text-white":"bg-white/5 text-zinc-400"}`}>{label}</button>)}</div>
+        <div className="mt-4 flex flex-wrap items-center gap-2"><button disabled={!!busy&&!autoChapter} onClick={()=>{setError("");setNotice("");if(!autoChapter)setVideoUrl("");setAutoChapter((value)=>!value)}} className={`whitespace-nowrap rounded-xl px-4 py-2 text-sm font-black ${autoChapter?"bg-emerald-500 text-black":"border border-emerald-500/40 bg-emerald-500/10 text-emerald-200"}`}><Sparkles className="mr-1 inline" size={14}/> AUTO {autoChapter?"ON":"OFF"}</button><div className="flex gap-2 overflow-x-auto">{tabs.map(([id,label])=><button key={id} onClick={()=>setTab(id)} className={`whitespace-nowrap rounded-xl px-4 py-2 text-sm ${tab===id?"bg-violet-500 text-white":"bg-white/5 text-zinc-400"}`}>{label}</button>)}</div></div>
       </section>
 
       {progress&&<div className="flex items-center justify-between gap-3 rounded-2xl border border-violet-500/20 bg-violet-500/8 p-4 text-sm text-violet-200"><div><Loader2 className="mr-2 inline animate-spin" size={15}/>{progress}</div>{busy&&<button onClick={cancelCurrentTask} className="shrink-0 rounded-lg border border-red-300/40 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-200">Cancel</button>}</div>}
