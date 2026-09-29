@@ -845,7 +845,7 @@ export function MangaPageProductionStudio(){
   };
 
   const savePipelineCheckpoint=(phase:"idle"|"analysis"|"planning"|"images"|"narration"|"voice"|"video"|"complete"|"error",message="")=>{
-    void fetch("/api/manga/pipeline-job",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({projectId:project.id,chapterId:chapter.id,phase,message})}).catch(()=>{});
+    void fetch("/api/manga/pipeline-job",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({projectId:project.id,chapterId:chapter.id,chapterNumber:Math.max(1,project.chapters.findIndex((item)=>item.id===chapter.id)+1),phase,message})}).catch(()=>{});
   };
 
   // AUTO is a resumable chapter state machine. It never changes the existing generators:
