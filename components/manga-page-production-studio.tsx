@@ -51,7 +51,7 @@ type ActiveStoryGeneratorCommand=StoryGeneratorCommand&{projectId:string;chapter
 
 const beatDetailLabel=(preset:MangaPacingPreset)=>preset==="Fast"?"Low":preset==="Balanced"?"Standard":"Highest";
 
-export function MangaPageProductionStudio(){
+export function MangaPageProductionStudio({workspaceView="studio",onWorkspaceViewChange}:{workspaceView?:"studio"|"chapters";onWorkspaceViewChange?:(view:"studio"|"chapters")=>void}={}){
   const [state,setState]=useState<MangaStudioState>(()=>{const p=createProject("My Manga Project");return {activeProjectId:p.id,projects:[p]}});
   const stateRef=useRef(state);
   const [hydrated,setHydrated]=useState(false);
@@ -238,6 +238,41 @@ export function MangaPageProductionStudio(){
   const chapter=useMemo(()=>project?.chapters.find((item)=>item.id===project.activeChapterId)||project?.chapters[0],[project]);
   if(!project||!chapter)return <div className="p-8 text-zinc-400">Loading Manga Studio…</div>;
   const production=chapter.manga;
+
+  if(workspaceView==="chapters"){
+    return <section className="mx-auto max-w-7xl p-4 text-slate-900 md:p-6">
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div><div className="text-lg font-black">Chapter Production Dashboard</div><div className="mt-1 text-xs text-slate-500">{project.name} · {project.chapters.length} chapters from this Manga Studio project</div></div>
+          <button onClick={()=>setAutoChapter((value)=>!value)} className={"rounded-xl border px-3 py-2 text-xs font-black "+(autoChapter?"border-emerald-300 bg-emerald-50 text-emerald-800":"border-slate-200 bg-slate-50 text-slate-600")}>AUTO {autoChapter?"ON":"OFF"}</button>
+        </div>
+        <div className="mt-5 space-y-4">
+          {project.chapters.map((item,index)=>{
+            const analyzed=Boolean(item.manga?.beats.length);
+            const planned=Boolean(item.manga?.pages.length)&&Boolean(item.manga&&item.manga.nextBeatIndex>=item.manga.beats.length);
+            const images=Boolean(item.manga?.pages.length)&&Boolean(item.manga?.pages.every((page)=>page.composedImageDataUrl));
+            const explainer=Boolean(item.narration?.segments.length);
+            const voice=Boolean(item.narration?.segments.length)&&Boolean(item.narration?.segments.every((segment)=>segment.audioDataUrl));
+            const active=item.id===chapter.id;
+            const open=()=>{updateProject((current)=>({...current,activeChapterId:item.id,updatedAt:now()}));onWorkspaceViewChange?.("studio")};
+            const chip=(done:boolean)=>done?" ✓":"";
+            return <article key={item.id} className={"rounded-xl border p-4 "+(active?"border-violet-300 bg-violet-50/30":"border-slate-200 bg-white")}>
+              <div className="flex flex-wrap items-center justify-between gap-2"><div><div className="text-xs font-black uppercase tracking-wide text-violet-600">Chapter {index+1}</div><div className="font-bold">{item.title}</div></div><div className="text-[11px] text-slate-400">{item.story.trim().length?item.story.trim().split(/\s+/).length:0} words</div></div>
+              <details className="mt-3 rounded-lg border border-slate-200 bg-white"><summary className="cursor-pointer px-3 py-2 text-xs font-bold">Input Story{chip(item.story.trim().length>=20)}</summary><textarea value={item.story} onChange={(event)=>updateProject((current)=>({...current,chapters:current.chapters.map((ch)=>ch.id===item.id?{...ch,story:event.target.value,updatedAt:now()}:ch),updatedAt:now()}))} className="min-h-36 w-full border-t border-slate-200 p-3 text-sm leading-6 outline-none" placeholder={`Chapter ${index+1} story paste करो…`}/></details>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button disabled={item.story.trim().length<20} onClick={open} className={"rounded-lg border px-3 py-2 text-xs font-bold disabled:opacity-35 "+(analyzed?"border-emerald-300 bg-emerald-50 text-emerald-800":"border-violet-200 bg-violet-50 text-violet-800")}>Analyze{chip(analyzed)}</button>
+                <button disabled={!analyzed} onClick={open} className={"rounded-lg border px-3 py-2 text-xs font-bold disabled:opacity-35 "+(planned?"border-emerald-300 bg-emerald-50 text-emerald-800":"border-slate-200")}>Planning{chip(planned)}</button>
+                <button disabled={!planned} onClick={open} className={"rounded-lg border px-3 py-2 text-xs font-bold disabled:opacity-35 "+(images?"border-emerald-300 bg-emerald-50 text-emerald-800":"border-slate-200")}>Images{chip(images)}</button>
+                <button disabled={!planned} onClick={open} className={"rounded-lg border px-3 py-2 text-xs font-bold disabled:opacity-35 "+(explainer?"border-emerald-300 bg-emerald-50 text-emerald-800":"border-slate-200")}>Explainer{chip(explainer)}</button>
+                <button disabled={!explainer} onClick={open} className={"rounded-lg border px-3 py-2 text-xs font-bold disabled:opacity-35 "+(voice?"border-emerald-300 bg-emerald-50 text-emerald-800":"border-slate-200")}>Voice{chip(voice)}</button>
+                <button disabled={!images||!voice} onClick={open} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold disabled:opacity-35">Build Video</button>
+              </div>
+            </article>
+          })}
+        </div>
+      </div>
+    </section>;
+  }
 
   const updateProject=(fn:(project:MangaProject)=>MangaProject)=>applyState((current)=>mutateProject(current,project.id,fn));
   const updateChapter=(fn:(chapter:MangaChapter)=>MangaChapter)=>updateProject((current)=>({...current,updatedAt:now(),chapters:current.chapters.map((item)=>item.id===chapter.id?fn(item):item)}));
