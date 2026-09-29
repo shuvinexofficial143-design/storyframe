@@ -3,7 +3,6 @@
 import {useState} from "react";
 import {BookOpen,ListChecks} from "lucide-react";
 import {MangaPageProductionStudio} from "./manga-page-production-studio";
-import {StoryGeneratorWorkspace} from "./story-generator-workspace";
 
 type WorkspaceSection="studio"|"chapters";
 
@@ -16,7 +15,6 @@ export function StoryFrameWorkspace(){
         <button onClick={()=>setSection("chapters")} className={"flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold shadow-sm transition "+(section==="chapters"?"bg-violet-500 text-white":"border border-slate-200 bg-white text-slate-600")}><ListChecks size={16}/> Chapters</button>
       </div>
     </div>
-    <div className={section==="studio"?"block":"hidden"}><MangaPageProductionStudio/></div>
-    <div className={section==="chapters"?"mx-auto max-w-7xl p-4 md:p-6":"hidden"}><StoryGeneratorWorkspace view="chapters" onOpenMangaStory={()=>setSection("studio")}/></div>
+    <MangaPageProductionStudio workspaceView={section} onWorkspaceViewChange={setSection}/>
   </>;
 }
