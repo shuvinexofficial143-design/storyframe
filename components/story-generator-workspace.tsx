@@ -45,6 +45,8 @@ export function StoryGeneratorWorkspace({view="generator",onOpenMangaStory,onPip
   const [copyFrom,setCopyFrom]=useState(1);
   const [copyTo,setCopyTo]=useState(1);
   const [copyStatus,setCopyStatus]=useState("");
+  const [chapterAuto,setChapterAuto]=useState(false);
+  const [openStoryId,setOpenStoryId]=useState("");
   const pendingMangaRef=useRef(new Map<string,{chapterId:string;mode:"sync"|"build"}>());
   const nextChapterRunnerRef=useRef<()=>Promise<void>>(async()=>{});
   const generatorAbortRef=useRef<AbortController|null>(null);
@@ -367,6 +369,26 @@ export function StoryGeneratorWorkspace({view="generator",onOpenMangaStory,onPip
     void generateOverview();
   };
 
+  const updateChapterStory=(chapterIdValue:string,story:string)=>applyState((value)=>({...value,chapters:value.chapters.map((item)=>item.id===chapterIdValue?{...item,story,wordCount:wordCount(story),updatedAt:now()}:item),updatedAt:now()}));
+
+  const generateChapterExplainer=async(target:GeneratedStoryChapter)=>{
+    if(target.story.trim().length<20){update({error:`Chapter ${target.number}: पहले Input Story डालो।`});return}
+    try{
+      applyState((value)=>({...value,status:`Chapter ${target.number}: generating explainer…`,error:"",updatedAt:now()}));
+      const response=await fetch("/api/story-generator",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
+        action:"explainer",analysisModel:stateRef.current.analysisModel,chapterTitle:target.title,chapterStory:target.story,explainerPrompt:stateRef.current.explainerPrompt
+      })});
+      const explainer=(await parseJsonResponse<ExplainerResponse>(response)).data.explainer;
+      applyState((value)=>({...value,status:`Chapter ${target.number}: explainer complete.`,chapters:value.chapters.map((item)=>item.id===target.id?{...item,explainer,ttsStatus:"idle",updatedAt:now()}:item),updatedAt:now()}));
+    }catch(error){update({error:error instanceof Error?error.message:"Explainer generation failed."})}
+  };
+
+  const runChapterBuild=(target:GeneratedStoryChapter)=>{
+    if(target.story.trim().length<20){update({error:`Chapter ${target.number}: Input Story required before manga analysis.`});return}
+    dispatchToMangaStudio(target,"build");
+    if(chapterAuto&&!target.explainer.trim())void generateChapterExplainer(target);
+  };
+
   const resetGenerator=()=>{
     if(state.running)return;
     const fresh=initialState();
@@ -428,19 +450,36 @@ export function StoryGeneratorWorkspace({view="generator",onOpenMangaStory,onPip
       </>}
 
       {view==="chapters"&&<div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3"><div><div className="font-bold">Generated Chapters</div><div className="text-xs text-slate-500">{state.chapters.length} chapters · {totalWords.toLocaleString()} story words generated</div></div>{state.autoContinue&&<div className="rounded-lg bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">Auto Continue ON</div>}</div>
-        <div className="mt-4">{chapterTabs}</div>
-        {selected?<article className="mt-5 rounded-xl border border-slate-200 p-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div><div className="text-xs font-bold uppercase tracking-wide text-violet-600">Original Chapter {selected.number}</div><h3 className="mt-1 text-lg font-black">{selected.title}</h3><div className="mt-1 text-xs text-slate-400">{selected.wordCount} words · Manga: {selected.mangaStatus}</div></div>
-            <div className="flex flex-wrap gap-2">
-              {selected.mangaStatus==="error"&&<button disabled={state.running} onClick={retryResume} className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800 disabled:opacity-40">Retry / Resume</button>}
-              <button disabled={state.running||selected.mangaStatus==="building"} onClick={openSelectedInManga} className="rounded-lg bg-violet-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-40">{selected.mangaStatus==="complete"?"Open Manga Studio":"Open in Manga Studio & Build"}</button>{state.running&&selected.mangaStatus==="building"&&<button onClick={cancelGeneratorTask} className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs font-bold text-red-700">Cancel</button>}
-            </div>
-          </div>
-          <div className="mt-4 max-h-[680px] overflow-y-auto whitespace-pre-wrap text-sm leading-7 text-slate-700">{selected.story}</div>
-          {selected.error&&<div className="mt-4 rounded-lg bg-red-50 p-3 text-xs text-red-700">{selected.error}</div>}
-        </article>:<div className="mt-4 rounded-xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-400">Story Generator में overview बनाकर Chapter 1 generate करो।</div>}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div><div className="font-bold">Chapter Production Dashboard</div><div className="text-xs text-slate-500">{state.chapters.length} chapters · {totalWords.toLocaleString()} local story words</div></div>
+          <label className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-800">AUTO
+            <button type="button" onClick={()=>setChapterAuto((value)=>!value)} className={"relative h-6 w-11 rounded-full transition "+(chapterAuto?"bg-emerald-500":"bg-slate-300")}><span className={"absolute top-1 h-4 w-4 rounded-full bg-white transition "+(chapterAuto?"left-6":"left-1")}/></button>
+            {chapterAuto?"ON":"OFF"}
+          </label>
+        </div>
+        <div className="mt-5 space-y-4">
+          {state.chapters.length?state.chapters.slice().sort((a,b)=>a.number-b.number).map((item)=>{
+            const storyReady=item.story.trim().length>=20;
+            const mangaDone=item.mangaStatus==="complete";
+            const mangaRunning=item.mangaStatus==="building";
+            const explainerDone=Boolean(item.explainer.trim());
+            const voiceDone=item.ttsStatus==="complete";
+            const stage=(done:boolean,running=false)=>done?"✓":running?"…":"";
+            return <article key={item.id} className="rounded-xl border border-slate-200 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2"><div><div className="text-xs font-black uppercase tracking-wide text-violet-600">Chapter {item.number}</div><div className="font-bold">{item.title}</div></div><div className="text-[11px] text-slate-400">{item.wordCount} words</div></div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button onClick={()=>setOpenStoryId((value)=>value===item.id?"":item.id)} className={"rounded-lg border px-3 py-2 text-xs font-bold "+(storyReady?"border-emerald-300 bg-emerald-50 text-emerald-800":"border-slate-200 bg-slate-50 text-slate-700")}>Input Story {stage(storyReady)}</button>
+                <button disabled={!storyReady||mangaRunning} onClick={()=>runChapterBuild(item)} className={"rounded-lg border px-3 py-2 text-xs font-bold disabled:opacity-35 "+(mangaDone?"border-emerald-300 bg-emerald-50 text-emerald-800":"border-violet-200 bg-violet-50 text-violet-800")}>Analyze / Plan {stage(mangaDone,mangaRunning)}</button>
+                <button disabled={!storyReady||mangaRunning} onClick={()=>runChapterBuild(item)} className={"rounded-lg border px-3 py-2 text-xs font-bold disabled:opacity-35 "+(mangaDone?"border-emerald-300 bg-emerald-50 text-emerald-800":"border-slate-200")}>Images {stage(mangaDone,mangaRunning)}</button>
+                <button disabled={!storyReady} onClick={()=>void generateChapterExplainer(item)} className={"rounded-lg border px-3 py-2 text-xs font-bold disabled:opacity-35 "+(explainerDone?"border-emerald-300 bg-emerald-50 text-emerald-800":"border-cyan-200 bg-cyan-50 text-cyan-800")}>Explainer {stage(explainerDone)}</button>
+                <button disabled={!explainerDone} onClick={()=>{setSelectedChapterId(item.id);onOpenMangaStory?.()}} className={"rounded-lg border px-3 py-2 text-xs font-bold disabled:opacity-35 "+(voiceDone?"border-emerald-300 bg-emerald-50 text-emerald-800":"border-slate-200")}>Voice {stage(voiceDone,item.ttsStatus==="generating")}</button>
+                <button disabled={!mangaDone||!explainerDone} onClick={()=>{setSelectedChapterId(item.id);onOpenMangaStory?.()}} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold disabled:opacity-35">Build Video</button>
+              </div>
+              {openStoryId===item.id&&<textarea value={item.story} onChange={(event)=>updateChapterStory(item.id,event.target.value)} className="mt-3 min-h-36 w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm leading-6 outline-none focus:border-violet-400" placeholder={`Chapter ${item.number} story paste करो…`}/>}
+              {item.error&&<div className="mt-3 rounded-lg bg-red-50 p-3 text-xs text-red-700">{item.error}</div>}
+            </article>
+          }):<div className="rounded-xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-400">अभी कोई chapter नहीं है। Story Generator से chapter बनाओ।</div>}
+        </div>
       </div>}
 
       {view==="explainer"&&<div className="grid gap-5 xl:grid-cols-[.9fr_1.1fr]">
