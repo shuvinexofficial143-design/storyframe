@@ -1,3 +1,5 @@
+import fixWebmDuration from "fix-webm-duration";
+
 export type TimelineVideoSegment={id:string;pageNumber:number;image:string;audio:string};
 
 type Timed={segment:TimelineVideoSegment;buffer:AudioBuffer;start:number;duration:number};
@@ -118,6 +120,11 @@ export async function buildTimelineVideo(segments:TimelineVideoSegment[],options
     stream.getTracks().forEach((track)=>track.stop());canvasStream.getTracks().forEach((track)=>track.stop());
     currentImage.src="";
     if(nextImagePromise)void nextImagePromise.then((image)=>{image.src=""}).catch(()=>{});
-    return {blob:new Blob(chunks,{type}),totalSeconds:total,mimeType:type};
+    const rawBlob=new Blob(chunks,{type});
+    options.onProgress?.("Finalizing seekable video metadata…");
+    // Chromium MediaRecorder WebM often omits Duration. Patch the known master-timeline
+    // duration into the container so players know the full length immediately and can seek.
+    const blob=await fixWebmDuration(rawBlob,Math.max(1,Math.round(total*1000)),{logger:false});
+    return {blob,totalSeconds:total,mimeType:type};
   }finally{await audioContext.close()}
 }
