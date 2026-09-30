@@ -891,18 +891,29 @@ export function MangaPageProductionStudio({workspaceView="studio",onWorkspaceVie
             const explainer=Boolean(item.narration?.segments.length);
             const voice=Boolean(item.narration?.segments.length)&&Boolean(item.narration?.segments.every((segment)=>segment.audioDataUrl));
             const active=item.id===chapter.id;
-            const open=()=>{updateProject((current)=>({...current,activeChapterId:item.id,updatedAt:now()}));onWorkspaceViewChange?.("studio")};
+            const selectChapter=()=>updateProject((current)=>({...current,activeChapterId:item.id,updatedAt:now()}));
+            const runDashboardStage=(stage:"analyze"|"planning"|"images"|"explainer"|"voice"|"video")=>{
+              selectChapter();
+              window.setTimeout(()=>{
+                if(stage==="analyze")void buildManga();
+                else if(stage==="planning")void planNextPages();
+                else if(stage==="images")void generateAllPages();
+                else if(stage==="explainer")void generateNarrationPlan();
+                else if(stage==="voice")void generateNarrationAudio();
+                else void exportNarrationVideo();
+              },0);
+            };
             const chip=(done:boolean)=>done?" ✓":"";
             return <article key={item.id} className={"rounded-xl border p-4 "+(active?"border-violet-300 bg-violet-50/30":"border-slate-200 bg-white")}>
               <div className="flex flex-wrap items-center justify-between gap-2"><div><div className="text-xs font-black uppercase tracking-wide text-violet-600">Chapter {index+1}</div><div className="font-bold">{item.title}</div></div><div className="text-[11px] text-slate-400">{item.story.trim().length?item.story.trim().split(/\s+/).length:0} words</div></div>
               <details className="mt-3 rounded-lg border border-slate-200 bg-white"><summary className="cursor-pointer px-3 py-2 text-xs font-bold">Input Story{chip(item.story.trim().length>=20)}</summary><textarea value={item.story} onChange={(event)=>updateProject((current)=>({...current,chapters:current.chapters.map((ch)=>ch.id===item.id?{...ch,story:event.target.value,updatedAt:now()}:ch),updatedAt:now()}))} className="min-h-36 w-full border-t border-slate-200 p-3 text-sm leading-6 outline-none" placeholder={`Chapter ${index+1} story paste करो…`}/></details>
               <div className="mt-3 flex flex-wrap gap-2">
-                <button disabled={item.story.trim().length<20} onClick={open} className={"rounded-lg border px-3 py-2 text-xs font-bold disabled:opacity-35 "+(analyzed?"border-emerald-300 bg-emerald-50 text-emerald-800":"border-violet-200 bg-violet-50 text-violet-800")}>Analyze{chip(analyzed)}</button>
-                <button disabled={!analyzed} onClick={open} className={"rounded-lg border px-3 py-2 text-xs font-bold disabled:opacity-35 "+(planned?"border-emerald-300 bg-emerald-50 text-emerald-800":"border-slate-200")}>Planning{chip(planned)}</button>
-                <button disabled={!planned} onClick={open} className={"rounded-lg border px-3 py-2 text-xs font-bold disabled:opacity-35 "+(images?"border-emerald-300 bg-emerald-50 text-emerald-800":"border-slate-200")}>Images{chip(images)}</button>
-                <button disabled={!planned} onClick={open} className={"rounded-lg border px-3 py-2 text-xs font-bold disabled:opacity-35 "+(explainer?"border-emerald-300 bg-emerald-50 text-emerald-800":"border-slate-200")}>Explainer{chip(explainer)}</button>
-                <button disabled={!explainer} onClick={open} className={"rounded-lg border px-3 py-2 text-xs font-bold disabled:opacity-35 "+(voice?"border-emerald-300 bg-emerald-50 text-emerald-800":"border-slate-200")}>Voice{chip(voice)}</button>
-                <button disabled={!images||!voice} onClick={open} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold disabled:opacity-35">Build Video</button>
+                <button disabled={item.story.trim().length<20} onClick={()=>runDashboardStage("analyze")} className={"rounded-lg border px-3 py-2 text-xs font-bold disabled:opacity-35 "+(analyzed?"border-emerald-300 bg-emerald-50 text-emerald-800":"border-violet-200 bg-violet-50 text-violet-800")}>Analyze{chip(analyzed)}</button>
+                <button disabled={!analyzed} onClick={()=>runDashboardStage("planning")} className={"rounded-lg border px-3 py-2 text-xs font-bold disabled:opacity-35 "+(planned?"border-emerald-300 bg-emerald-50 text-emerald-800":"border-slate-200")}>Planning{chip(planned)}</button>
+                <button disabled={!planned} onClick={()=>runDashboardStage("images")} className={"rounded-lg border px-3 py-2 text-xs font-bold disabled:opacity-35 "+(images?"border-emerald-300 bg-emerald-50 text-emerald-800":"border-slate-200")}>Images{chip(images)}</button>
+                <button disabled={!planned} onClick={()=>runDashboardStage("explainer")} className={"rounded-lg border px-3 py-2 text-xs font-bold disabled:opacity-35 "+(explainer?"border-emerald-300 bg-emerald-50 text-emerald-800":"border-slate-200")}>Explainer{chip(explainer)}</button>
+                <button disabled={!explainer} onClick={()=>runDashboardStage("voice")} className={"rounded-lg border px-3 py-2 text-xs font-bold disabled:opacity-35 "+(voice?"border-emerald-300 bg-emerald-50 text-emerald-800":"border-slate-200")}>Voice{chip(voice)}</button>
+                <button disabled={!images||!voice} onClick={()=>runDashboardStage("video")} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold disabled:opacity-35">Build Video</button>
               </div>
             </article>
           })}
