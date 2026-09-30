@@ -238,6 +238,9 @@ export function MangaPageProductionStudio({workspaceView="studio",onWorkspaceVie
   const chapter=useMemo(()=>project?.chapters.find((item)=>item.id===project.activeChapterId)||project?.chapters[0],[project]);
   if(!project||!chapter)return <div className="p-8 text-zinc-400">Loading Manga Studio…</div>;
   const production=chapter.manga;
+  // Dashboard callbacks need these helpers before the Chapters early return.
+  const updateProject=(fn:(project:MangaProject)=>MangaProject)=>applyState((current)=>mutateProject(current,project.id,fn));
+  const updateChapter=(fn:(chapter:MangaChapter)=>MangaChapter)=>updateProject((current)=>({...current,updatedAt:now(),chapters:current.chapters.map((item)=>item.id===chapter.id?fn(item):item)}));
 
   if(workspaceView==="chapters"){
     return <section className="mx-auto max-w-7xl p-4 text-slate-900 md:p-6">
@@ -274,8 +277,6 @@ export function MangaPageProductionStudio({workspaceView="studio",onWorkspaceVie
     </section>;
   }
 
-  const updateProject=(fn:(project:MangaProject)=>MangaProject)=>applyState((current)=>mutateProject(current,project.id,fn));
-  const updateChapter=(fn:(chapter:MangaChapter)=>MangaChapter)=>updateProject((current)=>({...current,updatedAt:now(),chapters:current.chapters.map((item)=>item.id===chapter.id?fn(item):item)}));
   const setStory=(story:string)=>updateChapter((item)=>({...item,story,updatedAt:now()}));
 
   const changePacing=(value:string)=>{
