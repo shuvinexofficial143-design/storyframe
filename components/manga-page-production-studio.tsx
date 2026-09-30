@@ -64,6 +64,7 @@ export function MangaPageProductionStudio({workspaceView="studio",onWorkspaceVie
   const [narrationVoice,setNarrationVoice]=useState<string>(DEFAULT_TTS_VOICE);
   const [narrationStyle,setNarrationStyle]=useState("Fast-paced Hindi fantasy/anime recap voice. Speak like the protagonist is personally recounting what is happening right now: direct, energetic, confident and slightly raw. Keep sentences short, transitions quick, and emphasize sudden danger, attacks, wins, losses, ranks, numbers, rewards and discoveries when present. Use natural micro-pauses after strong actions and reveals, but do not become theatrical or documentary-like. Avoid formal newsreader cadence and avoid reading every line with the same rhythm. Pronunciation must stay clear and human.");
   const [videoUrl,setVideoUrl]=useState("");
+  const [chapterVideoUrls,setChapterVideoUrls]=useState<Record<string,string>>({});
   const [autoChapter,setAutoChapter]=useState(false);
   const [promptEditorPageId,setPromptEditorPageId]=useState<string|null>(null);
   const [pagePromptOverrides,setPagePromptOverrides]=useState<Record<string,string>>({});
@@ -840,6 +841,7 @@ export function MangaPageProductionStudio({workspaceView="studio",onWorkspaceVie
       const url=URL.createObjectURL(result.blob);
       if(videoUrl)URL.revokeObjectURL(videoUrl);
       setVideoUrl(url);
+      setChapterVideoUrls((current)=>{const previous=current[chapter.id];if(previous&&previous!==url)URL.revokeObjectURL(previous);return {...current,[chapter.id]:url}});
       setNotice(`Video ready · ${Math.round(result.totalSeconds)}s · master-clock synchronized · full manga pages preserved without crop.`);
     }catch(reason){
       setError(reason instanceof Error?reason.message:"Video export failed.");
@@ -913,7 +915,7 @@ export function MangaPageProductionStudio({workspaceView="studio",onWorkspaceVie
                 <button disabled={!planned} onClick={()=>runDashboardStage("images")} className={"rounded-lg border px-3 py-2 text-xs font-bold disabled:opacity-35 "+(images?"border-emerald-300 bg-emerald-50 text-emerald-800":"border-slate-200")}>Images{chip(images)}</button>
                 <button disabled={!planned} onClick={()=>runDashboardStage("explainer")} className={"rounded-lg border px-3 py-2 text-xs font-bold disabled:opacity-35 "+(explainer?"border-emerald-300 bg-emerald-50 text-emerald-800":"border-slate-200")}>Explainer{chip(explainer)}</button>
                 <button disabled={!explainer} onClick={()=>runDashboardStage("voice")} className={"rounded-lg border px-3 py-2 text-xs font-bold disabled:opacity-35 "+(voice?"border-emerald-300 bg-emerald-50 text-emerald-800":"border-slate-200")}>Voice{chip(voice)}</button>
-                <button disabled={!images||!voice} onClick={()=>runDashboardStage("video")} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold disabled:opacity-35">Build Video</button>
+                <button disabled={!images||!voice} onClick={()=>runDashboardStage("video")} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold disabled:opacity-35">Build Video</button>\n                {chapterVideoUrls[item.id]?<a href={chapterVideoUrls[item.id]} download={`${safeFilePart(project.name)}-${safeFilePart(item.title)}-explainer.webm`} className="inline-flex items-center rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800"><Download className="mr-1.5" size={14}/> Download Video</a>:<button disabled title="Build Video complete होने के बाद download available होगा" className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-slate-400 opacity-50"><Download className="mr-1.5 inline" size={14}/> Download Video</button>}
               </div>
             </article>
           })}
