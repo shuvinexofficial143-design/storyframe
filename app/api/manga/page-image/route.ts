@@ -25,7 +25,8 @@ const Input=z.object({
   prompt:z.string().min(40).max(40000),
   seed:z.number().int().min(1).max(99_999_999),
   negativePrompt:z.string().optional(),
-  referenceImages:z.array(z.string()).max(4).default([])
+  referenceImages:z.array(z.string()).max(4).default([]),
+  model:z.enum(["gemini-3.1-flash-image","gemini-3-pro-image-preview","gemini-2.5-flash-image"]).optional()
 });
 
 export const maxDuration=120;
@@ -46,7 +47,7 @@ export async function POST(request:Request){
       ?.replace(/\b(?:gore|gory|mutilation|dismemberment|decapitation|corpse|suicide|self[- ]harm|rape|sexual assault|explicit sex|nude|naked)\b/gi,"")
       .replace(/\s{2,}/g," ")
       .trim();
-    const model=process.env.GEMINI_PAGE_IMAGE_MODEL?.trim()||undefined;
+    const model=parsed.data.model||process.env.GEMINI_PAGE_IMAGE_MODEL?.trim()||undefined;
     const width=1200;
     const height=1800;
     // Manga pages are continuity-critical. Keep one request in flight from the
