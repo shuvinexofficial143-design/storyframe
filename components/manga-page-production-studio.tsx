@@ -66,6 +66,8 @@ export function MangaPageProductionStudio({workspaceView="studio",onWorkspaceVie
   const [videoUrl,setVideoUrl]=useState("");
   const [chapterVideoUrls,setChapterVideoUrls]=useState<Record<string,string>>({});
   const [autoChapter,setAutoChapter]=useState(false);
+  const [imageModel,setImageModel]=useState("gemini-3.1-flash-image");
+  const [imageConcurrency,setImageConcurrency]=useState(3);
   const [promptEditorPageId,setPromptEditorPageId]=useState<string|null>(null);
   const [pagePromptOverrides,setPagePromptOverrides]=useState<Record<string,string>>({});
   const busyRef=useRef(busy);
@@ -513,7 +515,7 @@ export function MangaPageProductionStudio({workspaceView="studio",onWorkspaceVie
       url:"/api/manga/page-image",
       label:`Page ${latest.page.pageNumber}`,
       onStatus:setProgress,
-      body:{prompt:finalPrompt,negativePrompt:compiled.negativePrompt,seed,referenceImages:compiled.referenceImages},
+      body:{prompt:finalPrompt,negativePrompt:compiled.negativePrompt,seed,referenceImages:compiled.referenceImages,model:imageModel},
       signal
     });
     const pageForCompose={...latest.page,rawPageImageDataUrl:data.imageDataUrl,pagePrompt:finalPrompt,renderProvider:data.provider,renderModel:data.model,renderSeed:data.seed,status:"generated" as const};
@@ -881,6 +883,7 @@ export function MangaPageProductionStudio({workspaceView="studio",onWorkspaceVie
   if(workspaceView==="chapters"){
     return <section className="mx-auto max-w-7xl p-4 text-slate-900 md:p-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="mb-4 flex flex-wrap gap-3 text-xs"><label>Google Image Model <select value={imageModel} onChange={e=>setImageModel(e.target.value)} className="ml-2 rounded border p-2"><option value="gemini-3.1-flash-image">Gemini 3.1 Flash Image</option><option value="gemini-3-pro-image-preview">Gemini 3 Pro Image Preview</option><option value="gemini-2.5-flash-image">Gemini 2.5 Flash Image</option></select></label><label>Image concurrency <select value={imageConcurrency} onChange={e=>setImageConcurrency(Number(e.target.value))} className="ml-2 rounded border p-2">{[1,2,3,5,10,15].map(n=><option key={n} value={n}>{n}</option>)}</select></label></div>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div><div className="text-lg font-black">Chapter Production Dashboard</div><div className="mt-1 text-xs text-slate-500">{project.name} · {project.chapters.length} chapters from this Manga Studio project</div></div>
           <button onClick={()=>setAutoChapter((value)=>!value)} className={"rounded-xl border px-3 py-2 text-xs font-black "+(autoChapter?"border-emerald-300 bg-emerald-50 text-emerald-800":"border-slate-200 bg-slate-50 text-slate-600")}>AUTO {autoChapter?"ON":"OFF"}</button>
