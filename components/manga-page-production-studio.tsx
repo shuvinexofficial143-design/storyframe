@@ -823,6 +823,37 @@ export function MangaPageProductionStudio({workspaceView="studio",onWorkspaceVie
     }
   };
 
+  // Each dashboard narration job captures its own chapter ID and updates only that chapter.
+  const explainerJobsRef=useRef(new Set<string>());
+  const [chapterExplainerJobs,setChapterExplainerJobs]=useState<Record<string,string>>({});
+  const generateChapterExplainerInBackground=async(targetChapterId:string)=>{
+    if(explainerJobsRef.current.has(targetChapterId))return;
+    const target=stateRef.current.projects.find(p=>p.id===project.id)?.chapters.find(ch=>ch.id===targetChapterId);
+    if(!target?.manga?.pages.length){
+      setChapterExplainerJobs(prev=>({...prev,[targetChapterId]:"Plan visual pages before generating an explainer."}));
+      return;
+    }
+    explainerJobsRef.current.add(targetChapterId);
+    const status=(message:string)=>setChapterExplainerJobs(prev=>({...prev,[targetChapterId]:message}));
+    status("Generating explainer…");
+    try{
+      const response=await fetch("/api/narration/plan",{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({title:target.title,story:target.story,analysisModel:project.analysisModel,
+          pages:target.manga.pages.map(page=>({id:page.id,pageNumber:page.pageNumber,pagePurpose:page.pagePurpose,
+            beats:page.panels.map(panel=>({storyBeat:panel.storyBeat,sourceText:panel.sourceText}))}))})
+      });
+      const data=await parseJsonResponse<{kind:"narration-plan";data:{explainer:string;segments:Array<{pageId:string;pageNumber:number;text:string}>}}>(response);
+      const segments:NarrationSegment[]=data.data.segments.map((segment,index)=>({
+        id:`narration-${targetChapterId}-${index+1}`,pageId:segment.pageId,pageNumber:segment.pageNumber,text:segment.text,status:"idle"
+      }));
+      applyState(state=>mutateProject(state,project.id,p=>({...p,chapters:p.chapters.map(ch=>ch.id===targetChapterId?
+        {...ch,narration:{explainer:data.data.explainer,voice:narrationVoice,stylePrompt:narrationStyle,segments,updatedAt:now()},updatedAt:now()}:ch)})));
+      status(`✓ Explainer ready · ${segments.length} segments`);
+    }catch(e){status(`Error: ${e instanceof Error?e.message:"Explainer failed"}`);}
+    finally{explainerJobsRef.current.delete(targetChapterId);}
+  };
+
   // Dashboard voice jobs are keyed by chapter, independent of the active chapter
   // and the planning/image AbortController.
   const generateChapterVoiceInBackground=async(targetChapterId:string)=>{
@@ -927,6 +958,7 @@ export function MangaPageProductionStudio({workspaceView="studio",onWorkspaceVie
           <div><div className="text-lg font-black">Chapter Production Dashboard</div><div className="mt-1 text-xs text-slate-500">{project.name} · {project.chapters.length} chapters from this Manga Studio project</div></div>
           <button onClick={()=>setAutoChapter((value)=>!value)} className={"rounded-xl border px-3 py-2 text-xs font-black "+(autoChapter?"border-emerald-300 bg-emerald-50 text-emerald-800":"border-slate-200 bg-slate-50 text-slate-600")}>AUTO {autoChapter?"ON":"OFF"}</button>
         </div>
+        {Object.keys(chapterExplainerJobs).length>0&&<aside className="mt-4 rounded-xl border border-violet-200 bg-violet-50 p-3"><div className="mb-2 text-sm font-bold">Explainer Tasks · Separate Chapter Jobs</div>{Object.entries(chapterExplainerJobs).map(([id,status])=><div key={id} className="border-t border-violet-100 py-2 text-xs"><b>{project.chapters.find(ch=>ch.id===id)?.title||id}</b> — {status}</div>)}</aside>}
         {Object.keys(chapterVoiceJobs).length>0&&<aside className="mt-4 rounded-xl border border-indigo-200 bg-indigo-50 p-3"><div className="mb-2 text-sm font-bold">Voice Tasks · Separate Chapter Jobs</div>{Object.entries(chapterVoiceJobs).map(([id,status])=><div key={id} className="border-t border-indigo-100 py-2 text-xs"><b>{project.chapters.find(ch=>ch.id===id)?.title||id}</b> — {status}</div>)}</aside>}
         <div className="mt-5 space-y-4">
           {project.chapters.map((item,index)=>{
@@ -939,6 +971,7 @@ export function MangaPageProductionStudio({workspaceView="studio",onWorkspaceVie
             const selectChapter=()=>updateProject((current)=>({...current,activeChapterId:item.id,updatedAt:now()}));
             const runDashboardStage=(stage:"analyze"|"planning"|"images"|"explainer"|"voice"|"video")=>{
               if(stage==="voice"){void generateChapterVoiceInBackground(item.id);return;}
+              if(stage==="explainer"){void generateChapterExplainerInBackground(item.id);return;}
               // Never switch active chapter while another stage owns the shared runner.
               // The old timeout used stale chapter closures and could cancel an active job.
               if(busyRef.current){
