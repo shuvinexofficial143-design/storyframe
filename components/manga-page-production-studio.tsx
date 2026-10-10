@@ -60,6 +60,8 @@ export function MangaPageProductionStudio({workspaceView="studio",onWorkspaceVie
   const [progress,setProgress]=useState("");
   const [chapterVoiceJobs,setChapterVoiceJobs]=useState<Record<string,string>>({});
   const voiceJobsRef=useRef(new Set<string>());
+  const [chapterVideoJobs,setChapterVideoJobs]=useState<Record<string,string>>({});
+  const videoExportLockRef=useRef<string|null>(null);
   const explainerJobsRef=useRef(new Set<string>());
   const [chapterExplainerJobs,setChapterExplainerJobs]=useState<Record<string,string>>({});
   const [notice,setNotice]=useState("");
@@ -825,6 +827,42 @@ export function MangaPageProductionStudio({workspaceView="studio",onWorkspaceVie
     }
   };
 
+  // Video export is memory-intensive: serialize exports, but never block story or voice jobs.
+  const exportChapterVideoInBackground=async(targetChapterId:string)=>{
+    if(videoExportLockRef.current){
+      setChapterVideoJobs(prev=>({...prev,[targetChapterId]:"Video encoder busy. Retry when the current export finishes."}));
+      return;
+    }
+    const target=stateRef.current.projects.find(p=>p.id===project.id)?.chapters.find(ch=>ch.id===targetChapterId);
+    if(!target?.narration?.segments.length||!target.manga?.pages.length){
+      setChapterVideoJobs(prev=>({...prev,[targetChapterId]:"Generate pages, explainer and voice before exporting."}));
+      return;
+    }
+    const status=(message:string)=>setChapterVideoJobs(prev=>({...prev,[targetChapterId]:message}));
+    videoExportLockRef.current=targetChapterId;
+    try{
+      const segments=target.narration.segments.map(segment=>{
+        const page=target.manga!.pages.find(p=>p.id===segment.pageId);
+        if(!segment.audioDataUrl)throw new Error(`Page ${segment.pageNumber}: voice is missing.`);
+        if(!page?.composedImageDataUrl)throw new Error(`Page ${segment.pageNumber}: image is missing.`);
+        return {id:segment.id,pageNumber:segment.pageNumber,image:page.composedImageDataUrl,audio:segment.audioDataUrl};
+      });
+      const mobile=/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+      const result=await buildTimelineVideo(segments,{
+        width:mobile?854:1280,height:mobile?480:720,fps:mobile?18:30,bitrate:mobile?1_400_000:4_500_000,
+        onProgress:status
+      });
+      const url=URL.createObjectURL(result.blob);
+      setChapterVideoUrls(prev=>{
+        const old=prev[targetChapterId];
+        if(old&&old!==url)URL.revokeObjectURL(old);
+        return {...prev,[targetChapterId]:url};
+      });
+      status(`✓ Video ready · ${Math.round(result.totalSeconds)}s · download available`);
+    }catch(e){status(`Error: ${e instanceof Error?e.message:"Video export failed"}`);}
+    finally{videoExportLockRef.current=null;}
+  };
+
   // Each dashboard narration job captures its own chapter ID and updates only that chapter.
   const generateChapterExplainerInBackground=async(targetChapterId:string)=>{
     if(explainerJobsRef.current.has(targetChapterId))return;
@@ -958,6 +996,7 @@ export function MangaPageProductionStudio({workspaceView="studio",onWorkspaceVie
           <div><div className="text-lg font-black">Chapter Production Dashboard</div><div className="mt-1 text-xs text-slate-500">{project.name} · {project.chapters.length} chapters from this Manga Studio project</div></div>
           <button onClick={()=>setAutoChapter((value)=>!value)} className={"rounded-xl border px-3 py-2 text-xs font-black "+(autoChapter?"border-emerald-300 bg-emerald-50 text-emerald-800":"border-slate-200 bg-slate-50 text-slate-600")}>AUTO {autoChapter?"ON":"OFF"}</button>
         </div>
+        {Object.keys(chapterVideoJobs).length>0&&<aside className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3"><div className="mb-2 text-sm font-bold">Video Exports · Memory-safe Queue</div>{Object.entries(chapterVideoJobs).map(([id,status])=><div key={id} className="border-t border-emerald-100 py-2 text-xs"><b>{project.chapters.find(ch=>ch.id===id)?.title||id}</b> — {status}</div>)}</aside>}
         {Object.keys(chapterExplainerJobs).length>0&&<aside className="mt-4 rounded-xl border border-violet-200 bg-violet-50 p-3"><div className="mb-2 text-sm font-bold">Explainer Tasks · Separate Chapter Jobs</div>{Object.entries(chapterExplainerJobs).map(([id,status])=><div key={id} className="border-t border-violet-100 py-2 text-xs"><b>{project.chapters.find(ch=>ch.id===id)?.title||id}</b> — {status}</div>)}</aside>}
         {Object.keys(chapterVoiceJobs).length>0&&<aside className="mt-4 rounded-xl border border-indigo-200 bg-indigo-50 p-3"><div className="mb-2 text-sm font-bold">Voice Tasks · Separate Chapter Jobs</div>{Object.entries(chapterVoiceJobs).map(([id,status])=><div key={id} className="border-t border-indigo-100 py-2 text-xs"><b>{project.chapters.find(ch=>ch.id===id)?.title||id}</b> — {status}</div>)}</aside>}
         <div className="mt-5 space-y-4">
@@ -972,6 +1011,7 @@ export function MangaPageProductionStudio({workspaceView="studio",onWorkspaceVie
             const runDashboardStage=(stage:"analyze"|"planning"|"images"|"explainer"|"voice"|"video")=>{
               if(stage==="voice"){void generateChapterVoiceInBackground(item.id);return;}
               if(stage==="explainer"){void generateChapterExplainerInBackground(item.id);return;}
+              if(stage==="video"){void exportChapterVideoInBackground(item.id);return;}
               // Never switch active chapter while another stage owns the shared runner.
               // The old timeout used stale chapter closures and could cancel an active job.
               if(busyRef.current){
