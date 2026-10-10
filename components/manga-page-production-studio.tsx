@@ -60,6 +60,8 @@ export function MangaPageProductionStudio({workspaceView="studio",onWorkspaceVie
   const [progress,setProgress]=useState("");
   const [chapterVoiceJobs,setChapterVoiceJobs]=useState<Record<string,string>>({});
   const voiceJobsRef=useRef(new Set<string>());
+  const explainerJobsRef=useRef(new Set<string>());
+  const [chapterExplainerJobs,setChapterExplainerJobs]=useState<Record<string,string>>({});
   const [notice,setNotice]=useState("");
   const [error,setError]=useState("");
   const [pacingPreset,setPacingPreset]=useState<MangaPacingPreset>("Balanced");
@@ -824,8 +826,6 @@ export function MangaPageProductionStudio({workspaceView="studio",onWorkspaceVie
   };
 
   // Each dashboard narration job captures its own chapter ID and updates only that chapter.
-  const explainerJobsRef=useRef(new Set<string>());
-  const [chapterExplainerJobs,setChapterExplainerJobs]=useState<Record<string,string>>({});
   const generateChapterExplainerInBackground=async(targetChapterId:string)=>{
     if(explainerJobsRef.current.has(targetChapterId))return;
     const target=stateRef.current.projects.find(p=>p.id===project.id)?.chapters.find(ch=>ch.id===targetChapterId);
