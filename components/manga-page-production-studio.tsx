@@ -58,6 +58,8 @@ export function MangaPageProductionStudio({workspaceView="studio",onWorkspaceVie
   const [tab,setTab]=useState<Tab>("story");
   const [busy,setBusy]=useState("");
   const [progress,setProgress]=useState("");
+  const [chapterVoiceJobs,setChapterVoiceJobs]=useState<Record<string,string>>({});
+  const voiceJobsRef=useRef(new Set<string>());
   const [notice,setNotice]=useState("");
   const [error,setError]=useState("");
   const [pacingPreset,setPacingPreset]=useState<MangaPacingPreset>("Balanced");
@@ -821,6 +823,43 @@ export function MangaPageProductionStudio({workspaceView="studio",onWorkspaceVie
     }
   };
 
+  // Dashboard voice jobs are keyed by chapter, independent of the active chapter
+  // and the planning/image AbortController.
+  const generateChapterVoiceInBackground=async(targetChapterId:string)=>{
+    if(voiceJobsRef.current.has(targetChapterId))return;
+    const target=stateRef.current.projects.find(p=>p.id===project.id)?.chapters.find(ch=>ch.id===targetChapterId);
+    if(!target?.narration?.segments.length){
+      setChapterVoiceJobs(prev=>({...prev,[targetChapterId]:"Explainer narration plan is required before voice generation."}));
+      return;
+    }
+    voiceJobsRef.current.add(targetChapterId);
+    const updateJob=(message:string)=>setChapterVoiceJobs(prev=>({...prev,[targetChapterId]:message}));
+    const updateSegment=(segmentId:string,patch:Partial<NarrationSegment>)=>{
+      applyState(state=>mutateProject(state,project.id,p=>({...p,chapters:p.chapters.map(ch=>ch.id===targetChapterId&&ch.narration?{...ch,narration:{...ch.narration,segments:ch.narration.segments.map(s=>s.id===segmentId?{...s,...patch}:s),updatedAt:now()},updatedAt:now()}:ch)})));
+    };
+    try{
+      for(let i=0;i<target.narration.segments.length;i++){
+        const segment=stateRef.current.projects.find(p=>p.id===project.id)?.chapters.find(ch=>ch.id===targetChapterId)?.narration?.segments[i];
+        if(!segment)continue;
+        if(segment.audioDataUrl){updateJob(`Voice ${i+1}/${target.narration.segments.length} already ready`);continue;}
+        updateJob(`Voice ${i+1}/${target.narration.segments.length} generating…`);
+        updateSegment(segment.id,{status:"generating",error:undefined});
+        try{
+          const response=await fetch("/api/narration/tts",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text:segment.text,voice:narrationVoice,stylePrompt:narrationStyle})});
+          const data=await parseJsonResponse<{kind:"narration-audio";audioDataUrl:string}>(response);
+          const durationMs=await audioDurationMs(data.audioDataUrl);
+          updateSegment(segment.id,{audioDataUrl:data.audioDataUrl,durationMs,status:"complete",error:undefined});
+        }catch(e){
+          const message=e instanceof Error?e.message:"Voice generation failed";
+          updateSegment(segment.id,{status:"error",error:message});
+          throw e;
+        }
+      }
+      updateJob("✓ Voice generation complete");
+    }catch(e){updateJob(`Error: ${e instanceof Error?e.message:"Voice generation failed"}`);}
+    finally{voiceJobsRef.current.delete(targetChapterId);}
+  };
+
   const exportNarrationVideo=async()=>{
     const current=stateRef.current.projects.find((item)=>item.id===project.id)?.chapters.find((item)=>item.id===chapter.id);
     const narration=current?.narration;
@@ -888,6 +927,7 @@ export function MangaPageProductionStudio({workspaceView="studio",onWorkspaceVie
           <div><div className="text-lg font-black">Chapter Production Dashboard</div><div className="mt-1 text-xs text-slate-500">{project.name} · {project.chapters.length} chapters from this Manga Studio project</div></div>
           <button onClick={()=>setAutoChapter((value)=>!value)} className={"rounded-xl border px-3 py-2 text-xs font-black "+(autoChapter?"border-emerald-300 bg-emerald-50 text-emerald-800":"border-slate-200 bg-slate-50 text-slate-600")}>AUTO {autoChapter?"ON":"OFF"}</button>
         </div>
+        {Object.keys(chapterVoiceJobs).length>0&&<aside className="mt-4 rounded-xl border border-indigo-200 bg-indigo-50 p-3"><div className="mb-2 text-sm font-bold">Voice Tasks · Separate Chapter Jobs</div>{Object.entries(chapterVoiceJobs).map(([id,status])=><div key={id} className="border-t border-indigo-100 py-2 text-xs"><b>{project.chapters.find(ch=>ch.id===id)?.title||id}</b> — {status}</div>)}</aside>}
         <div className="mt-5 space-y-4">
           {project.chapters.map((item,index)=>{
             const analyzed=Boolean(item.manga?.beats.length);
@@ -898,6 +938,7 @@ export function MangaPageProductionStudio({workspaceView="studio",onWorkspaceVie
             const active=item.id===chapter.id;
             const selectChapter=()=>updateProject((current)=>({...current,activeChapterId:item.id,updatedAt:now()}));
             const runDashboardStage=(stage:"analyze"|"planning"|"images"|"explainer"|"voice"|"video")=>{
+              if(stage==="voice"){void generateChapterVoiceInBackground(item.id);return;}
               // Never switch active chapter while another stage owns the shared runner.
               // The old timeout used stale chapter closures and could cancel an active job.
               if(busyRef.current){
