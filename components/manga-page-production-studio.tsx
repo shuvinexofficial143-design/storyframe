@@ -841,7 +841,7 @@ export function MangaPageProductionStudio({workspaceView="studio",onWorkspaceVie
         onProgress:setProgress
       });
       const url=URL.createObjectURL(result.blob);
-      if(videoUrl)URL.revokeObjectURL(videoUrl);
+      // Preserve previous chapters\u0027 download URLs while exporting another chapter.
       setVideoUrl(url);
       setChapterVideoUrls((current)=>{const previous=current[chapter.id];if(previous&&previous!==url)URL.revokeObjectURL(previous);return {...current,[chapter.id]:url}});
       setNotice(`Video ready · ${Math.round(result.totalSeconds)}s · master-clock synchronized · full manga pages preserved without crop.`);
