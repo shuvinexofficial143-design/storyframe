@@ -898,7 +898,17 @@ export function MangaPageProductionStudio({workspaceView="studio",onWorkspaceVie
             const active=item.id===chapter.id;
             const selectChapter=()=>updateProject((current)=>({...current,activeChapterId:item.id,updatedAt:now()}));
             const runDashboardStage=(stage:"analyze"|"planning"|"images"|"explainer"|"voice"|"video")=>{
-              selectChapter();
+              // Never switch active chapter while another stage owns the shared runner.
+              // The old timeout used stale chapter closures and could cancel an active job.
+              if(busyRef.current){
+                setNotice(`Another chapter task is running (${busyRef.current}). Wait for it to finish before starting ${stage}; the active task was not cancelled.`);
+                return;
+              }
+              if(!active){
+                selectChapter();
+                setNotice(`Chapter ${index+1} selected. Tap ${stage} again to start it safely.`);
+                return;
+              }
               window.setTimeout(()=>{
                 if(stage==="analyze")void buildManga();
                 else if(stage==="planning")void planNextPages();
