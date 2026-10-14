@@ -365,7 +365,17 @@ export function MangaPageProductionStudio({workspaceView="studio",onWorkspaceVie
 
   const saveProduction=(baseProject:MangaProject,chapterId:string,nextProduction:MangaChapterProduction)=>{
     const nextProject={...baseProject,updatedAt:now(),chapters:baseProject.chapters.map((item)=>item.id===chapterId?{...item,manga:nextProduction,updatedAt:now()}:item)};
-    applyState((current)=>mutateProject(current,baseProject.id,()=>nextProject));
+    applyState((current)=>mutateProject(current,baseProject.id,(live)=>({
+      ...live,updatedAt:now(),chapters:live.chapters.map(ch=>{
+        if(ch.id!==chapterId)return ch;
+        const savedPages=new Map(ch.manga?.pages.map(pg=>[pg.id,pg])||[]);
+        const pages=nextProduction.pages.map(pg=>{
+          const saved=savedPages.get(pg.id);
+          return saved?.composedImageDataUrl?saved:pg;
+        });
+        return {...ch,manga:{...nextProduction,pages},updatedAt:now()};
+      })
+    })));
     return nextProject;
   };
 
@@ -373,6 +383,8 @@ export function MangaPageProductionStudio({workspaceView="studio",onWorkspaceVie
     let workingProject=baseProject;
     let workingProduction=startProduction;
     let guard=0;
+    let imageWorker:Promise<void>=Promise.resolve();
+    let imageFailure:unknown=null;
     while(workingProduction.nextBeatIndex<workingProduction.beats.length){
       guard+=1;
       if(guard>Math.max(12,workingProduction.beats.length+2))throw new Error("Manga page planning stopped because the planner did not finish the remaining beats.");
@@ -392,7 +404,16 @@ export function MangaPageProductionStudio({workspaceView="studio",onWorkspaceVie
         updatedAt:now()
       };
       workingProject=saveProduction(workingProject,chapterId,workingProduction);
+      const newPageIds=pages.slice(-planned.pages.length).map(pg=>pg.id);
+      imageWorker=imageWorker.then(async()=>{
+        for(const pageId of newPageIds){
+          if(signal?.aborted)throw new DOMException("Cancelled","AbortError");
+          await renderPage(pageId,false,signal);
+        }
+      }).catch(error=>{imageFailure??=error;});
     }
+    await imageWorker;
+    if(imageFailure)throw imageFailure;
     return {project:workingProject,production:workingProduction};
   };
 
