@@ -15,7 +15,7 @@ const providers:Record<string,ImageProvider>={
 const MAX_EMBEDDED_IMAGE_BYTES=220_000;
 const MAX_EMBEDDED_EDGE=1024;
 const GEMINI_IMAGE_RETRY_DELAYS_MS=[2_000,5_000] as const;
-const GEMINI_QUOTA_FALLBACK_MODEL="gemini-3.1-flash-lite-image";
+const GEMINI_IMAGE_FALLBACK_MODELS=["gemini-3.1-flash-image","gemini-2.5-flash-image"] as const;
 
 export function getImageProvider(id="gemini"){
   return providers[id]||geminiImageProvider;
@@ -195,18 +195,22 @@ export async function generateImageWithFallback(input:ImageGenerationInput):Prom
     // continuity/reference support by failing over inside Gemini before ever
     // considering the text-only public fallback.
     const requestedModel=input.model||desired.defaultModel;
-    if(desired.id==="gemini"&&isRetryableImageProviderFailure(error)&&requestedModel!==GEMINI_QUOTA_FALLBACK_MODEL){
-      try{
-        const geminiFallback=await executeProvider(desired,{...input,model:GEMINI_QUOTA_FALLBACK_MODEL,retryProvider:false});
-        return {
-          ...geminiFallback,
-          fallbackUsed:true,
-          primaryError,
-          warning:`Primary Gemini image capacity was temporarily unavailable, so StoryFrame used ${GEMINI_QUOTA_FALLBACK_MODEL} while preserving Gemini reference-image continuity. ${primaryError}`
-        };
-      }catch(geminiFallbackError){
-        if(input.allowFallback===false)throw geminiFallbackError;
+    if(desired.id==="gemini"&&isRetryableImageProviderFailure(error)){
+      let lastError:unknown=error;
+      // Fail over only on temporary quota/capacity errors; do not hide safety,
+      // invalid model IDs, authentication failures or permission errors.
+      for(const fallbackModel of GEMINI_IMAGE_FALLBACK_MODELS){
+        if(fallbackModel===requestedModel)continue;
+        try{
+          const fallbackResult=await executeProvider(desired,{...input,model:fallbackModel,retryProvider:false});
+          return {...fallbackResult,fallbackUsed:true,primaryError,
+            warning:`Gemini model ${requestedModel} was temporarily unavailable; used ${fallbackModel} with reference-image continuity.`};
+        }catch(fallbackError){
+          lastError=fallbackError;
+          if(!isRetryableImageProviderFailure(fallbackError))break;
+        }
       }
+      if(input.allowFallback===false)throw lastError;
     }else if(input.allowFallback===false){
       throw error;
     }
