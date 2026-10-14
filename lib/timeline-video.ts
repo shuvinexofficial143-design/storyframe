@@ -48,10 +48,16 @@ export async function buildTimelineVideo(segments:TimelineVideoSegment[],options
   try{
     options.onProgress?.("Preparing master audio timeline…");
     const buffers:AudioBuffer[]=[];
+    let decodedAudioBytes=0;
+    const mobile=/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+    const audioBudgetBytes=mobile?72*1024*1024:256*1024*1024;
     for(let i=0;i<segments.length;i+=1){
       const response=await fetch(segments[i].audio);
       if(!response.ok)throw new Error(`Visual Page ${segments[i].pageNumber} audio could not be loaded.`);
-      buffers.push(await audioContext.decodeAudioData(await response.arrayBuffer()));
+      const buffer=await audioContext.decodeAudioData(await response.arrayBuffer());
+      decodedAudioBytes+=buffer.length*buffer.numberOfChannels*4;
+      if(decodedAudioBytes>audioBudgetBytes)throw new Error("Video audio exceeds the safe browser memory budget. Export shorter chapter parts or use a desktop browser.");
+      buffers.push(buffer);
       options.onProgress?.(`Preparing audio ${i+1}/${segments.length}…`);
     }
     let cursor=0;
@@ -124,7 +130,13 @@ export async function buildTimelineVideo(segments:TimelineVideoSegment[],options
     options.onProgress?.("Finalizing seekable video metadata…");
     // Chromium MediaRecorder WebM often omits Duration. Patch the known master-timeline
     // duration into the container so players know the full length immediately and can seek.
-    const blob=await fixWebmDuration(rawBlob,Math.max(1,Math.round(total*1000)),{logger:false});
+    // Duration patching copies the complete recording; skip that second full-size
+    // allocation for large files, especially on mobile browsers with low RAM.
+    const patchBudget=mobile?24*1024*1024:96*1024*1024;
+    const blob=rawBlob.size<=patchBudget
+      ?await fixWebmDuration(rawBlob,Math.max(1,Math.round(total*1000)),{logger:false})
+      :rawBlob;
+    if(rawBlob.size>patchBudget)options.onProgress?.("Large video exported without metadata rewrite to avoid browser memory exhaustion.");
     return {blob,totalSeconds:total,mimeType:type};
   }finally{await audioContext.close()}
 }
